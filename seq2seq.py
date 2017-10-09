@@ -1,12 +1,10 @@
 import tensorflow as tf
-import numpy as np
-import os
 from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.python.layers.core import Dense
 from tensorflow.python.framework import constant_op
 
 
-# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 _PAD = b"PAD"
 _GO = b"GO"
 _EOS = b"EOS"
@@ -20,7 +18,7 @@ UNK_ID = 3
 
 
 class seq2seq(object):
-    def __init__(self, hparams_dict):
+    def __init__(self, hparams_dict, vocab):
         # TODO: copy hparams
         # self.batch_size = hparams_dict['batch_size']
         self.vocab_size = hparams_dict['vocab_size']
@@ -34,8 +32,9 @@ class seq2seq(object):
         self.lr = hparams_dict['lr']
         self.keep_prob = hparams_dict['keep_prob']
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        # self.max_gradient_norm = 5.0
 
-        self._make_input()
+        self._make_input(vocab)
 
         self.output_layer = Dense(self.vocab_size,
                                   kernel_initializer=tf.truncated_normal_initializer(stddev=0.1))
@@ -43,9 +42,9 @@ class seq2seq(object):
         self._build_decoder()
         self.saver = tf.train.Saver()
         print hparams_dict
+        print tf.trainable_variables()
 
-
-    def _make_input(self):
+    def _make_input(self, vocab):
         self.symbol2index = MutableHashTable(
             key_dtype=tf.string,
             value_dtype=tf.int64,
@@ -60,6 +59,11 @@ class seq2seq(object):
             shared_name="out_table",
             name="out_table",
             checkpoint=True)
+
+        self.op_in = self.symbol2index.insert(constant_op.constant(vocab),
+                                              constant_op.constant(range(len(vocab)), dtype=tf.int64))
+        self.op_out = self.index2symbol.insert(constant_op.constant(range(len(vocab)), dtype=tf.int64),
+                                               constant_op.constant(vocab))
 
         self.post_string = tf.placeholder(tf.string,(None,None),'post')
         self.response_string = tf.placeholder(tf.string, (None, None), 'response')
@@ -89,7 +93,6 @@ class seq2seq(object):
         self.response_input = tf.concat([tf.ones((self.batch_size, 1), dtype=tf.int64) * GO_ID,
                                          tf.split(self.response, [self.batch_len - 1, 1], axis=1)[0]], 1)
         self.dec_inp = tf.nn.embedding_lookup(self.emb_dec, self.response_input)
-
 
     def _build_encoder(self):
         with tf.variable_scope("encode"):
@@ -123,16 +126,16 @@ class seq2seq(object):
 
         mask = tf.sequence_mask(self.response_len, self.batch_len, dtype=tf.float32)
         self.train_loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
-        # self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.train_loss)
+        self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.train_loss)
         self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
 
         # calculate the gradient of parameters
-        self.params = tf.trainable_variables()
-        opt = tf.train.GradientDescentOptimizer(1)
-        gradients = tf.gradients(self.train_loss, self.params)
-        clipped_gradients, self.gradient_norm = tf.clip_by_global_norm(gradients,
-                                                                       5.0)
-        self.train_op = opt.apply_gradients(zip(clipped_gradients, self.params))
+        # self.params = tf.trainable_variables()
+        # opt = tf.train.GradientDescentOptimizer(1)
+        # gradients = tf.gradients(self.train_loss, self.params)
+        # clipped_gradients, self.gradient_norm = tf.clip_by_global_norm(gradients,
+        #                                                                5.0)
+        # self.train_op = opt.apply_gradients(zip(clipped_gradients, self.params))
 
         with tf.variable_scope("decode", reuse=True):
             dec_cell = self._build_decoder_cell(self.enc_outputs, self.post_len)
@@ -166,7 +169,7 @@ class seq2seq(object):
             init_state = dec_cell.zero_state(self.batch_size * self.beam_width, tf.float32).clone(
                 cell_state=dec_init_state)
 
-            test_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+            beam_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
                 cell=dec_cell,
                 embedding=self.emb_dec,
                 start_tokens=tf.ones_like(self.post_len) * GO_ID,
@@ -175,12 +178,12 @@ class seq2seq(object):
                 beam_width=self.beam_width,
                 output_layer=self.output_layer
             )
-            test_output, _, test_lengths = tf.contrib.seq2seq.dynamic_decode(
-                decoder=test_decoder,
+            beam_output, _, beam_lengths = tf.contrib.seq2seq.dynamic_decode(
+                decoder=beam_decoder,
             )
 
-        self.test_len = tf.shape(test_output.predicted_ids)
-        self.test_out = self.index2symbol.lookup(tf.cast(test_output.predicted_ids,tf.int64))
+        self.beam_shape = tf.shape(beam_output.predicted_ids)
+        self.beam_out = self.index2symbol.lookup(tf.cast(beam_output.predicted_ids, tf.int64))
 
     def _build_encoder_cell(self):
         if self.use_lstm:
@@ -215,14 +218,24 @@ class seq2seq(object):
         )
         return attn_cell
 
-    def infer(self, sess, dp):
-        while True:
-            infer_data = {}
-            infer_data['post'] = raw_input('post > ').strip().split()
-            infer_data['response'] = ''.strip().split()
-            infer_data = [infer_data]
-            for batch in dp.batchify(infer_data,1):
-                res = sess.run([self.inference,self.test_out],batch)
-                print 'inference > '+' '.join(res[0][0])
-                print 'beam > '+' '.join(res[1][0,:,0])
+    def initialize(self, sess):
+        sess.run(tf.global_variables_initializer())
+        sess.run([self.op_in, self.op_out])
 
+    def step(self, sess, data, is_train=False):
+        input_feed = {
+            self.post: data['post'],
+            self.post_len: data['post_len'],
+            self.response: data['response'],
+            self.response_len: data['response_len']
+        }
+        if is_train:
+            output_feed = [self.train_op, self.train_loss]
+        else:
+            output_feed = [self.train_loss,
+                           self.post_string,
+                           self.response_string,
+                           self.train_out,
+                           self.inference,
+                           self.beam_out]
+        return sess.run(output_feed, input_feed)
