@@ -56,6 +56,7 @@ class data_process(object):
         dev_to.close()
         test_from.close()
         test_to.close()
+        print "split completed"
 
 
     def build_vocab(self,
@@ -116,10 +117,10 @@ class data_process(object):
             posts_length.append(len(item['post']) + 1)
             responses_length.append(len(item['response']) + 1)
 
-        batched_data = {'post:0': np.array(posts),
-                        'response:0': np.array(responses),
-                        'post_len:0': posts_length,
-                        'response_len:0': responses_length}
+        batched_data = {'post': np.array(posts),
+                        'response': np.array(responses),
+                        'post_len': posts_length,
+                        'response_len': responses_length}
         return batched_data
 
     def batchify(self,
@@ -156,7 +157,7 @@ if __name__ == '__main__':
     h_dict['share_emb'] = True
     h_dict['lr'] = 0.001
     h_dict['data_dir'] = 'data'
-    h_dict['splited'] = False
+    h_dict['splited'] = True
     h_dict['vocab_size'] = 4000
     h_dict['data_from'] = 'MSCOCO.p1.test'
     h_dict['data_to'] = 'MSCOCO.p2.test'
@@ -167,6 +168,7 @@ if __name__ == '__main__':
     h_dict['max_epoch'] = 2
     h_dict['is_train'] = True
     h_dict['train_dir'] = 'train'
+    h_dict['summary_dir'] = 'summary'
     # config = tf.ConfigProto()
     # config.gpu_options.allow_growth = True
     # print h_dict
@@ -175,9 +177,9 @@ if __name__ == '__main__':
     valid_data = dp.load_dev_data()
     test_data = dp.load_test_data()
     # print len(train_data)
-    vocab = dp.build_vocab(train_data)
 
-    s2s = seq2seq(h_dict, vocab)
+
+    s2s = seq2seq(h_dict)
     with tf.Session() as sess:
         if h_dict['is_train']:
             if tf.train.get_checkpoint_state(h_dict['train_dir']):
@@ -185,46 +187,40 @@ if __name__ == '__main__':
                 s2s.saver.restore(sess, tf.train.latest_checkpoint(h_dict['train_dir']))
             else:
                 print("Created model with fresh parameters.")
-                sess.run(tf.global_variables_initializer())
-                sess.run([s2s.op_in, s2s.op_out])
+                vocab = dp.build_vocab(train_data)
+                s2s.initialize(sess,vocab=vocab)
+
+            writer = tf.summary.FileWriter(h_dict['summary_dir'], sess.graph)
 
             while True:
                 # Keep track of average train cost for this epoch
                 train_cost = 0
                 for batch in dp.batchify(train_data, h_dict['batch_size']):
                     # print batch
-                    res = sess.run([s2s.train_op, s2s.train_loss,
-                                    ], batch)
-                    train_cost += res[1]
-
-                train_cost /= h_dict['train_size'] / h_dict['batch_size']
+                    train_op, train_loss, global_step, summary = s2s.step(sess, batch, is_train=True)
+                    train_cost += train_loss
+                    writer.add_summary(summary=summary,global_step=global_step)
+                # print global_step
+                train_cost /= h_dict['train_size'] // h_dict['batch_size']
 
                 test_cost = 0
                 for batch in dp.batchify(valid_data, h_dict['batch_size']):
                     if test_cost == 0:
                         # Test time
-                        t = sess.run([s2s.train_loss,
-                                      s2s.post_string,
-                                      s2s.response_string,
-                                      s2s.train_out,
-                                      s2s.inference,
-                                      s2s.beam_out,
-                                      # s2s.error_rate
-                                      ], batch)
-                        # er = t[6]
-                        print 'post: ', t[1][0]
-                        print 'response: ', t[2][0]
-                        print 'train_out: ', t[3][0]
-                        print 'infer_out: ', t[4][0]
-                        print 'test_out: ', t[5][0, :, 0]
+                        t = s2s.step(sess,batch,is_train=False)
+                        print 'post: ', ' '.join(t[1][0])
+                        print 'response: ', ' '.join(t[2][0])
+                        print 'train_out: ', ' '.join(t[3][0])
+                        print 'infer_out: ', ' '.join(t[4][0])
+                        print 'beam_out: ', ' '.join(t[5][0, :, 0])
                     else:
-                        t = sess.run([s2s.train_loss], batch)
+                        t = s2s.step(sess,batch,is_train=False)
                     test_cost += t[0]
                 test_cost /= h_dict['test_size'] / h_dict['batch_size']
                 print 'test ppl: ', np.exp(test_cost)
 
                 print("train loss:", train_cost, "test loss:", test_cost)
-                s2s.saver.save(sess, "%s/model.ckpt" % h_dict['train_dir'])
+                s2s.saver.save(sess, "%s/model.ckpt" % h_dict['train_dir'],global_step=global_step)
 
         else:
             s2s.saver.restore(sess, tf.train.latest_checkpoint(h_dict['train_dir']))

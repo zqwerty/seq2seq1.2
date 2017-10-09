@@ -18,7 +18,7 @@ UNK_ID = 3
 
 
 class seq2seq(object):
-    def __init__(self, hparams_dict, vocab):
+    def __init__(self, hparams_dict):
         # TODO: copy hparams
         # self.batch_size = hparams_dict['batch_size']
         self.vocab_size = hparams_dict['vocab_size']
@@ -32,19 +32,21 @@ class seq2seq(object):
         self.lr = hparams_dict['lr']
         self.keep_prob = hparams_dict['keep_prob']
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
         # self.max_gradient_norm = 5.0
 
-        self._make_input(vocab)
+        self._make_input()
 
         self.output_layer = Dense(self.vocab_size,
                                   kernel_initializer=tf.truncated_normal_initializer(stddev=0.1))
         self._build_encoder()
         self._build_decoder()
         self.saver = tf.train.Saver()
+        self.merged = tf.summary.merge_all()
         print hparams_dict
         print tf.trainable_variables()
 
-    def _make_input(self, vocab):
+    def _make_input(self):
         self.symbol2index = MutableHashTable(
             key_dtype=tf.string,
             value_dtype=tf.int64,
@@ -55,15 +57,12 @@ class seq2seq(object):
         self.index2symbol = MutableHashTable(
             key_dtype=tf.int64,
             value_dtype=tf.string,
-            default_value='_UNK',
+            default_value=_UNK,
             shared_name="out_table",
             name="out_table",
             checkpoint=True)
 
-        self.op_in = self.symbol2index.insert(constant_op.constant(vocab),
-                                              constant_op.constant(range(len(vocab)), dtype=tf.int64))
-        self.op_out = self.index2symbol.insert(constant_op.constant(range(len(vocab)), dtype=tf.int64),
-                                               constant_op.constant(vocab))
+
 
         self.post_string = tf.placeholder(tf.string,(None,None),'post')
         self.response_string = tf.placeholder(tf.string, (None, None), 'response')
@@ -129,6 +128,7 @@ class seq2seq(object):
         self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.train_loss)
         self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
 
+        tf.summary.scalar('train loss', self.train_loss)
         # calculate the gradient of parameters
         # self.params = tf.trainable_variables()
         # opt = tf.train.GradientDescentOptimizer(1)
@@ -218,19 +218,23 @@ class seq2seq(object):
         )
         return attn_cell
 
-    def initialize(self, sess):
+    def initialize(self, sess, vocab):
+        op_in = self.symbol2index.insert(constant_op.constant(vocab),
+                                         constant_op.constant(range(len(vocab)), dtype=tf.int64))
+        op_out = self.index2symbol.insert(constant_op.constant(range(len(vocab)), dtype=tf.int64),
+                                          constant_op.constant(vocab))
         sess.run(tf.global_variables_initializer())
-        sess.run([self.op_in, self.op_out])
+        sess.run([op_in, op_out])
 
     def step(self, sess, data, is_train=False):
         input_feed = {
-            self.post: data['post'],
+            self.post_string: data['post'],
             self.post_len: data['post_len'],
-            self.response: data['response'],
+            self.response_string: data['response'],
             self.response_len: data['response_len']
         }
         if is_train:
-            output_feed = [self.train_op, self.train_loss]
+            output_feed = [self.train_op, self.train_loss, self.step_inc, self.merged]
         else:
             output_feed = [self.train_loss,
                            self.post_string,
