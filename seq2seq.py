@@ -20,7 +20,6 @@ UNK_ID = 3
 class seq2seq(object):
     def __init__(self, tfFLAGS):
         # TODO: copy hparams
-        # self.batch_size = tfFLAGS.batch_size
         self.vocab_size = tfFLAGS.vocab_size
         self.embed_size = tfFLAGS.embed_size
         self.num_units = tfFLAGS.num_units
@@ -30,10 +29,10 @@ class seq2seq(object):
         self.attn_mode = tfFLAGS.attn_mode
         self.share_emb = tfFLAGS.share_emb
         self.learning_rate = tfFLAGS.learning_rate
-        self.keep_prob = tfFLAGS.keep_prob
+        self.train_keep_prob = tfFLAGS.keep_prob
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
-        # self.max_gradient_norm = 5.0
+        self.max_gradient_norm = 5.0
 
         self._make_input()
 
@@ -42,9 +41,9 @@ class seq2seq(object):
         self._build_encoder()
         self._build_decoder()
         self.saver = tf.train.Saver()
-        self.merged = tf.summary.merge_all()
         print tfFLAGS
-        print tf.trainable_variables()
+        for var in tf.trainable_variables():
+            print var
 
     def _make_input(self):
         with tf.variable_scope("input"):
@@ -92,6 +91,8 @@ class seq2seq(object):
                                              tf.split(self.response, [self.batch_len - 1, 1], axis=1)[0]], 1)
             self.dec_inp = tf.nn.embedding_lookup(self.emb_dec, self.response_input)
 
+            self.keep_prob = tf.placeholder_with_default(1.0, ())
+
     def _build_encoder(self):
         with tf.variable_scope("encode"):
             enc_cell = self._build_encoder_cell()
@@ -124,12 +125,17 @@ class seq2seq(object):
 
         mask = tf.sequence_mask(self.response_len, self.batch_len, dtype=tf.float32)
         self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
-        self.ppl = tf.exp(self.loss)
-        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+
+        # Calculate and clip gradients
+        params = tf.trainable_variables()
+        gradients = tf.gradients(self.loss, params)
+        clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
+        self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params))
+
+        # self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
         self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
 
-        tf.summary.scalar('loss', self.loss)
-        tf.summary.scalar('ppl', self.ppl)
         # calculate the gradient of parameters
         # self.params = tf.trainable_variables()
         # opt = tf.train.GradientDescentOptimizer(1)
@@ -237,17 +243,16 @@ class seq2seq(object):
         if is_train:
             output_feed = [self.train_op,
                            self.loss,
-                           self.ppl,
                            self.step_inc,
-                           self.merged]
+                           ]
+            input_feed[self.keep_prob] = self.train_keep_prob
         else:
             output_feed = [self.loss,
-                           self.ppl,
-                           self.post_string,
-                           self.response_string,
-                           self.train_out,
-                           self.inference,
-                           self.beam_out,
-                           self.global_step,
-                           self.merged]
+                           # self.ppl,
+                           # self.post_string,
+                           # self.response_string,
+                           # self.train_out,
+                           # self.inference,
+                           # self.beam_out,
+                           ]
         return sess.run(output_feed, input_feed)
