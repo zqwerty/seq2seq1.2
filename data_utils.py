@@ -6,23 +6,48 @@ import numpy as np
 from tensorflow.python.framework import constant_op
 from seq2seq import seq2seq, _START_VOCAB, _PAD, _EOS
 
+FLAGS = tf.app.flags.FLAGS
+
+tf.app.flags.DEFINE_string("data_from", "MSCOCO.p1.test", "data_from")
+tf.app.flags.DEFINE_string("data_to", "MSCOCO.p2.test", "data_to")
+tf.app.flags.DEFINE_string("data_dir", "./data", "data_dir")
+tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
+tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
+
+tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
+tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
+tf.app.flags.DEFINE_boolean("splited", True, "splited")
+tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
+
+tf.app.flags.DEFINE_integer("batch_size", 100, "batch_size")
+tf.app.flags.DEFINE_integer("embed_size", 128, "embed_size")
+tf.app.flags.DEFINE_integer("num_units", 50, "num_units")
+tf.app.flags.DEFINE_integer("num_layers", 1, "num_layers")
+tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
+tf.app.flags.DEFINE_integer("vocab_size", 4000, "vocab_size")
+tf.app.flags.DEFINE_integer("train_size", 10000, "train_size")
+tf.app.flags.DEFINE_integer("dev_size", 5000, "dev_size")
+tf.app.flags.DEFINE_integer("test_size", 5000, "test_size")
+
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
+tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
 class data_process(object):
     def __init__(self,
-                 hparams_dict):
-        self.data_dir = hparams_dict['data_dir']
+                 tfFLAGS):
+        self.data_dir = tfFLAGS.data_dir
         self.train_from = os.path.join(self.data_dir, 'train_from')
         self.train_to = os.path.join(self.data_dir, 'train_to')
         self.dev_from = os.path.join(self.data_dir, 'dev_from')
         self.dev_to = os.path.join(self.data_dir, 'dev_to')
         self.test_from = os.path.join(self.data_dir, 'test_from')
         self.test_to = os.path.join(self.data_dir, 'test_to')
-        if not hparams_dict['splited']:
-            self.data_from = os.path.join(self.data_dir,hparams_dict['data_from'])
-            self.data_to = os.path.join(self.data_dir,hparams_dict['data_to'])
-            self._split(hparams_dict['train_size'], hparams_dict['dev_size'], hparams_dict['test_size'])
-        self.vocab_size = hparams_dict['vocab_size']
-
+        if not tfFLAGS.splited:
+            self.data_from = os.path.join(self.data_dir,tfFLAGS.data_from)
+            self.data_to = os.path.join(self.data_dir,tfFLAGS.data_to)
+            self._split(tfFLAGS.train_size, tfFLAGS.dev_size, tfFLAGS.test_size)
+        self.vocab_size = tfFLAGS.vocab_size
 
     def _split(self, train_size, dev_size, test_size):
         total_size = train_size+dev_size+test_size
@@ -58,7 +83,6 @@ class data_process(object):
         test_to.close()
         print "split completed"
 
-
     def build_vocab(self,
                     data):
         print("Creating vocabulary...")
@@ -75,8 +99,6 @@ class data_process(object):
         if len(vocab_list) > self.vocab_size:
             vocab_list = vocab_list[:self.vocab_size]
         return vocab_list
-
-
 
     def load_train_data(self):
         return self.load_data(self.train_from,self.train_to)
@@ -139,89 +161,68 @@ class data_process(object):
             infer_data['post'] = raw_input('post > ').strip().split()
             infer_data['response'] = ''.strip().split()
             infer_data = [infer_data]
-            for batch in self.batchify(infer_data, 1):
-                res = sess.run([s2s.inference, s2s.beam_out], batch)
-                print 'inference > ' + ' '.join(res[0][0])
-                print 'beam > ' + ' '.join(res[1][0, :, 0])
+            batch = self.gen_batched_data(infer_data)
+            res = sess.run([s2s.inference, s2s.beam_out], batch)
+            print 'inference > ' + ' '.join(res[0][0])
+            print 'beam > ' + ' '.join(res[1][0, :, 0])
 
 
-if __name__ == '__main__':
-    h_dict = {}
-    h_dict['batch_size'] = 100
-    h_dict['embed_size'] = 128
-    h_dict['num_units'] = 50
-    h_dict['num_layers'] = 1
-    h_dict['beam_width'] = 5
-    h_dict['use_lstm'] = True
-    h_dict['attn_mode'] = 'Luong'
-    h_dict['share_emb'] = True
-    h_dict['lr'] = 0.001
-    h_dict['data_dir'] = 'data'
-    h_dict['splited'] = True
-    h_dict['vocab_size'] = 4000
-    h_dict['data_from'] = 'MSCOCO.p1.test'
-    h_dict['data_to'] = 'MSCOCO.p2.test'
-    h_dict['train_size'] = 10000
-    h_dict['dev_size'] = 5000
-    h_dict['test_size'] = 5000
-    h_dict['keep_prob'] = 0.8
-    h_dict['max_epoch'] = 2
-    h_dict['is_train'] = True
-    h_dict['train_dir'] = 'train'
-    h_dict['summary_dir'] = 'summary'
+def main(unused_argv):
+
     # config = tf.ConfigProto()
     # config.gpu_options.allow_growth = True
-    # print h_dict
-    dp = data_process(h_dict)
+    dp = data_process(FLAGS)
     train_data = dp.load_train_data()
     valid_data = dp.load_dev_data()
     test_data = dp.load_test_data()
-    # print len(train_data)
 
-
-    s2s = seq2seq(h_dict)
+    s2s = seq2seq(FLAGS)
     with tf.Session() as sess:
-        if h_dict['is_train']:
-            if tf.train.get_checkpoint_state(h_dict['train_dir']):
-                print("Reading model parameters from %s" % h_dict['train_dir'])
-                s2s.saver.restore(sess, tf.train.latest_checkpoint(h_dict['train_dir']))
+        if FLAGS.is_train:
+            if tf.train.get_checkpoint_state(FLAGS.train_dir):
+                print("Reading model parameters from %s" % FLAGS.train_dir)
+                s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
             else:
                 print("Created model with fresh parameters.")
                 vocab = dp.build_vocab(train_data)
-                s2s.initialize(sess,vocab=vocab)
+                s2s.initialize(sess, vocab=vocab)
 
-            writer = tf.summary.FileWriter(h_dict['summary_dir'], sess.graph)
+            train_writer = tf.summary.FileWriter(os.path.join(FLAGS.train_dir, 'train'), sess.graph)
+            test_writer = tf.summary.FileWriter(os.path.join(FLAGS.train_dir, 'test'))
 
             while True:
                 # Keep track of average train cost for this epoch
                 train_cost = 0
-                for batch in dp.batchify(train_data, h_dict['batch_size']):
+                for batch in dp.batchify(train_data, FLAGS.batch_size):
                     # print batch
-                    train_op, train_loss, global_step, summary = s2s.step(sess, batch, is_train=True)
+                    train_op, train_loss, train_ppl, global_step, summary = s2s.step(sess, batch, is_train=True)
                     train_cost += train_loss
-                    writer.add_summary(summary=summary,global_step=global_step)
+                    train_writer.add_summary(summary=summary, global_step=global_step)
                 # print global_step
-                train_cost /= h_dict['train_size'] // h_dict['batch_size']
+                train_cost /= FLAGS.train_size // FLAGS.batch_size
 
-                test_cost = 0
-                for batch in dp.batchify(valid_data, h_dict['batch_size']):
-                    if test_cost == 0:
-                        # Test time
-                        t = s2s.step(sess,batch,is_train=False)
-                        print 'post: ', ' '.join(t[1][0])
-                        print 'response: ', ' '.join(t[2][0])
-                        print 'train_out: ', ' '.join(t[3][0])
-                        print 'infer_out: ', ' '.join(t[4][0])
-                        print 'beam_out: ', ' '.join(t[5][0, :, 0])
-                    else:
-                        t = s2s.step(sess,batch,is_train=False)
-                    test_cost += t[0]
-                test_cost /= h_dict['test_size'] / h_dict['batch_size']
-                print 'test ppl: ', np.exp(test_cost)
+                valid_batch = dp.gen_batched_data(valid_data)
+                # Test time
+                t = s2s.step(sess, valid_batch, is_train=False)
+                print 'post: ', ' '.join(t[2][0])
+                print 'response: ', ' '.join(t[3][0])
+                print 'train_out: ', ' '.join(t[4][0])
+                print 'infer_out: ', ' '.join(t[5][0])
+                print 'beam_out: ', ' '.join(t[6][0, :, 0])
 
-                print("train loss:", train_cost, "test loss:", test_cost)
-                s2s.saver.save(sess, "%s/model.ckpt" % h_dict['train_dir'],global_step=global_step)
+                test_writer.add_summary(summary=t[8], global_step=t[7])
+                valid_cost = t[0]
+                # test_cost /= FLAGS.test_size / FLAGS.batch_size
+                print 'test ppl: ', np.exp(valid_cost)
+
+                print("train loss:", train_cost, "test loss:", valid_cost)
+                print("train ppl:", np.exp(train_cost), "test ppl:", np.exp(valid_cost))
+                s2s.saver.save(sess, "%s/model.ckpt" % FLAGS.train_dir, global_step=global_step)
 
         else:
-            s2s.saver.restore(sess, tf.train.latest_checkpoint(h_dict['train_dir']))
+            s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
             dp.infer(s2s, sess)
+
+
+if __name__ == '__main__':
+    tf.app.run()

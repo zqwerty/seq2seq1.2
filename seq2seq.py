@@ -18,19 +18,19 @@ UNK_ID = 3
 
 
 class seq2seq(object):
-    def __init__(self, hparams_dict):
+    def __init__(self, tfFLAGS):
         # TODO: copy hparams
-        # self.batch_size = hparams_dict['batch_size']
-        self.vocab_size = hparams_dict['vocab_size']
-        self.embed_size = hparams_dict['embed_size']
-        self.num_units = hparams_dict['num_units']
-        self.num_layers = hparams_dict['num_layers']
-        self.beam_width = hparams_dict['beam_width']
-        self.use_lstm = hparams_dict['use_lstm']
-        self.attn_mode = hparams_dict['attn_mode']
-        self.share_emb = hparams_dict['share_emb']
-        self.lr = hparams_dict['lr']
-        self.keep_prob = hparams_dict['keep_prob']
+        # self.batch_size = tfFLAGS.batch_size
+        self.vocab_size = tfFLAGS.vocab_size
+        self.embed_size = tfFLAGS.embed_size
+        self.num_units = tfFLAGS.num_units
+        self.num_layers = tfFLAGS.num_layers
+        self.beam_width = tfFLAGS.beam_width
+        self.use_lstm = tfFLAGS.use_lstm
+        self.attn_mode = tfFLAGS.attn_mode
+        self.share_emb = tfFLAGS.share_emb
+        self.learning_rate = tfFLAGS.learning_rate
+        self.keep_prob = tfFLAGS.keep_prob
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
         # self.max_gradient_norm = 5.0
@@ -43,55 +43,54 @@ class seq2seq(object):
         self._build_decoder()
         self.saver = tf.train.Saver()
         self.merged = tf.summary.merge_all()
-        print hparams_dict
+        print tfFLAGS
         print tf.trainable_variables()
 
     def _make_input(self):
-        self.symbol2index = MutableHashTable(
-            key_dtype=tf.string,
-            value_dtype=tf.int64,
-            default_value=UNK_ID,
-            shared_name="in_table",
-            name="in_table",
-            checkpoint=True)
-        self.index2symbol = MutableHashTable(
-            key_dtype=tf.int64,
-            value_dtype=tf.string,
-            default_value=_UNK,
-            shared_name="out_table",
-            name="out_table",
-            checkpoint=True)
+        with tf.variable_scope("input"):
+            self.symbol2index = MutableHashTable(
+                key_dtype=tf.string,
+                value_dtype=tf.int64,
+                default_value=UNK_ID,
+                shared_name="in_table",
+                name="in_table",
+                checkpoint=True)
+            self.index2symbol = MutableHashTable(
+                key_dtype=tf.int64,
+                value_dtype=tf.string,
+                default_value=_UNK,
+                shared_name="out_table",
+                name="out_table",
+                checkpoint=True)
 
+            self.post_string = tf.placeholder(tf.string,(None,None),'post')
+            self.response_string = tf.placeholder(tf.string, (None, None), 'response')
 
+            self.post = self.symbol2index.lookup(self.post_string)
+            self.post_len = tf.placeholder(tf.int32, (None,), 'post_len')
+            self.response = self.symbol2index.lookup(self.response_string)
+            self.response_len = tf.placeholder(tf.int32, (None,), 'response_len')
 
-        self.post_string = tf.placeholder(tf.string,(None,None),'post')
-        self.response_string = tf.placeholder(tf.string, (None, None), 'response')
+            with tf.variable_scope("embedding") as scope:
+                if self.share_emb:
+                    self.emb_enc = self.emb_dec = tf.get_variable(
+                        "emb_share", [self.vocab_size, self.embed_size], dtype=tf.float32
+                    )
+                else:
+                    self.emb_enc = tf.get_variable(
+                        "emb_enc", [self.vocab_size, self.embed_size], dtype=tf.float32
+                    )
+                    self.emb_dec = tf.get_variable(
+                        "emb_dec", [self.vocab_size, self.embed_size], dtype=tf.float32
+                    )
 
-        self.post = self.symbol2index.lookup(self.post_string)
-        self.post_len = tf.placeholder(tf.int32, (None,), 'post_len')
-        self.response = self.symbol2index.lookup(self.response_string)
-        self.response_len = tf.placeholder(tf.int32, (None,), 'response_len')
+            self.enc_inp = tf.nn.embedding_lookup(self.emb_enc, self.post)
 
-        with tf.variable_scope("embedding") as scope:
-            if self.share_emb:
-                self.emb_enc = self.emb_dec = tf.get_variable(
-                    "emb_share", [self.vocab_size, self.embed_size], dtype=tf.float32
-                )
-            else:
-                self.emb_enc = tf.get_variable(
-                    "emb_enc", [self.vocab_size, self.embed_size], dtype=tf.float32
-                )
-                self.emb_dec = tf.get_variable(
-                    "emb_dec", [self.vocab_size, self.embed_size], dtype=tf.float32
-                )
-
-        self.enc_inp = tf.nn.embedding_lookup(self.emb_enc, self.post)
-
-        self.batch_len = tf.shape(self.response)[1]
-        self.batch_size = tf.shape(self.response)[0]
-        self.response_input = tf.concat([tf.ones((self.batch_size, 1), dtype=tf.int64) * GO_ID,
-                                         tf.split(self.response, [self.batch_len - 1, 1], axis=1)[0]], 1)
-        self.dec_inp = tf.nn.embedding_lookup(self.emb_dec, self.response_input)
+            self.batch_len = tf.shape(self.response)[1]
+            self.batch_size = tf.shape(self.response)[0]
+            self.response_input = tf.concat([tf.ones((self.batch_size, 1), dtype=tf.int64) * GO_ID,
+                                             tf.split(self.response, [self.batch_len - 1, 1], axis=1)[0]], 1)
+            self.dec_inp = tf.nn.embedding_lookup(self.emb_dec, self.response_input)
 
     def _build_encoder(self):
         with tf.variable_scope("encode"):
@@ -124,11 +123,13 @@ class seq2seq(object):
             )
 
         mask = tf.sequence_mask(self.response_len, self.batch_len, dtype=tf.float32)
-        self.train_loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
-        self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.train_loss)
+        self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
+        self.ppl = tf.exp(self.loss)
+        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
         self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
 
-        tf.summary.scalar('train loss', self.train_loss)
+        tf.summary.scalar('loss', self.loss)
+        tf.summary.scalar('ppl', self.ppl)
         # calculate the gradient of parameters
         # self.params = tf.trainable_variables()
         # opt = tf.train.GradientDescentOptimizer(1)
@@ -234,12 +235,19 @@ class seq2seq(object):
             self.response_len: data['response_len']
         }
         if is_train:
-            output_feed = [self.train_op, self.train_loss, self.step_inc, self.merged]
+            output_feed = [self.train_op,
+                           self.loss,
+                           self.ppl,
+                           self.step_inc,
+                           self.merged]
         else:
-            output_feed = [self.train_loss,
+            output_feed = [self.loss,
+                           self.ppl,
                            self.post_string,
                            self.response_string,
                            self.train_out,
                            self.inference,
-                           self.beam_out]
+                           self.beam_out,
+                           self.global_step,
+                           self.merged]
         return sess.run(output_feed, input_feed)
