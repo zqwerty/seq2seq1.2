@@ -36,8 +36,9 @@ class seq2seq(object):
 
         self._make_input()
 
-        self.output_layer = Dense(self.vocab_size,
-                                  kernel_initializer=tf.truncated_normal_initializer(stddev=0.1))
+        with tf.variable_scope("input"):
+            self.output_layer = Dense(self.vocab_size,
+                                      kernel_initializer=tf.truncated_normal_initializer(stddev=0.1))
         self._build_encoder()
         self._build_decoder()
         self.saver = tf.train.Saver()
@@ -123,26 +124,18 @@ class seq2seq(object):
                 decoder=train_decoder,
             )
 
-        mask = tf.sequence_mask(self.response_len, self.batch_len, dtype=tf.float32)
-        self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
+            mask = tf.sequence_mask(self.response_len, self.batch_len, dtype=tf.float32)
+            self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
 
-        # Calculate and clip gradients
-        params = tf.trainable_variables()
-        gradients = tf.gradients(self.loss, params)
-        clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
-        optimizer = tf.train.AdamOptimizer(self.learning_rate)
-        self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params))
+            # Calculate and clip gradients
+            params = tf.trainable_variables()
+            gradients = tf.gradients(self.loss, params)
+            clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+            optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params))
 
-        # self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
-        self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
-
-        # calculate the gradient of parameters
-        # self.params = tf.trainable_variables()
-        # opt = tf.train.GradientDescentOptimizer(1)
-        # gradients = tf.gradients(self.train_loss, self.params)
-        # clipped_gradients, self.gradient_norm = tf.clip_by_global_norm(gradients,
-        #                                                                5.0)
-        # self.train_op = opt.apply_gradients(zip(clipped_gradients, self.params))
+            # self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+            self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
             dec_cell = self._build_decoder_cell(self.enc_outputs, self.post_len)
@@ -165,13 +158,13 @@ class seq2seq(object):
                 decoder=infer_decoder
             )
 
-        self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id,tf.int64))
-
-        dec_init_state = tf.contrib.seq2seq.tile_batch(dec_init_state, self.beam_width)
-        enc_outputs = tf.contrib.seq2seq.tile_batch(self.enc_outputs, self.beam_width)
-        post_len = tf.contrib.seq2seq.tile_batch(self.post_len, self.beam_width)
+            self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id,tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
+            dec_init_state = tf.contrib.seq2seq.tile_batch(dec_init_state, self.beam_width)
+            enc_outputs = tf.contrib.seq2seq.tile_batch(self.enc_outputs, self.beam_width)
+            post_len = tf.contrib.seq2seq.tile_batch(self.post_len, self.beam_width)
+
             dec_cell = self._build_decoder_cell(enc_outputs, post_len)
             init_state = dec_cell.zero_state(self.batch_size * self.beam_width, tf.float32).clone(
                 cell_state=dec_init_state)
@@ -189,8 +182,8 @@ class seq2seq(object):
                 decoder=beam_decoder,
             )
 
-        self.beam_shape = tf.shape(beam_output.predicted_ids)
-        self.beam_out = self.index2symbol.lookup(tf.cast(beam_output.predicted_ids, tf.int64))
+            self.beam_shape = tf.shape(beam_output.predicted_ids)
+            self.beam_out = self.index2symbol.lookup(tf.cast(beam_output.predicted_ids, tf.int64))
 
     def _build_encoder_cell(self):
         if self.use_lstm:

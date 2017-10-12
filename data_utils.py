@@ -30,6 +30,7 @@ tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
 tf.app.flags.DEFINE_integer("train_size", 206902, "train_size")
 tf.app.flags.DEFINE_integer("valid_size", 10000, "valid_size")
 tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
+tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
 tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
@@ -197,9 +198,13 @@ def main(unused_argv):
             time_step = 0
             while True:
                 global_step = s2s.global_step.eval()
-                if global_step % 1000 == 0:
-                    time_step /= 1000
-                    train_loss /= 1000
+                if global_step % FLAGS.save_every_n_iteration == 1:
+                    time_step /= FLAGS.save_every_n_iteration
+                    train_loss /= FLAGS.save_every_n_iteration
+                    summary = tf.Summary()
+                    summary.value.add(tag='train loss', simple_value=train_loss)
+                    summary.value.add(tag='train ppl', simple_value=np.exp(train_loss))
+                    train_writer.add_summary(summary=summary, global_step=global_step)
                     print("global step %d step-time %.4f train loss %f perplexity %f"
                           % (global_step, time_step, train_loss, np.exp(train_loss)))
                     train_loss = 0
@@ -223,11 +228,6 @@ def main(unused_argv):
                 train_batch = dp.train_batch(train_data, FLAGS.batch_size)
                 train_op, loss, global_step = s2s.step(sess, train_batch, is_train=True)
                 train_loss += loss
-                summary = tf.Summary()
-                summary.value.add(tag='train loss', simple_value=loss)
-                summary.value.add(tag='train ppl', simple_value=np.exp(loss))
-                train_writer.add_summary(summary=summary, global_step=global_step)
-
                 time_step += (time.time() - start_time)
 
         else:
