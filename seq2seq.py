@@ -3,8 +3,6 @@ from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.python.layers.core import Dense
 from tensorflow.python.framework import constant_op
 
-
-
 _PAD = b"PAD"
 _GO = b"GO"
 _EOS = b"EOS"
@@ -19,7 +17,6 @@ UNK_ID = 3
 
 class seq2seq(object):
     def __init__(self, tfFLAGS):
-        # TODO: copy hparams
         self.vocab_size = tfFLAGS.vocab_size
         self.embed_size = tfFLAGS.embed_size
         self.num_units = tfFLAGS.num_units
@@ -30,7 +27,7 @@ class seq2seq(object):
         self.share_emb = tfFLAGS.share_emb
         self.learning_rate = tfFLAGS.learning_rate
         self.train_keep_prob = tfFLAGS.keep_prob
-        self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        self.global_step = tf.Variable(1, name="global_step", trainable=False)
         self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
         self.max_gradient_norm = 5.0
 
@@ -133,8 +130,8 @@ class seq2seq(object):
             clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
             self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params))
-
             # self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+
             self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
@@ -197,14 +194,14 @@ class seq2seq(object):
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units),self.keep_prob) for _ in range(self.num_layers)])
         else:
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units),self.keep_prob) for _ in range(self.num_layers)])
-        if (self.attn_mode=='Luong'):
+        if self.attn_mode=='Luong':
             attention_mechanism = tf.contrib.seq2seq.LuongAttention(
                 num_units=self.num_units,
                 memory=memory,
                 memory_sequence_length=memory_len,
                 scale=True
             )
-        elif (self.attn_mode=='Bahdanau'):
+        elif self.attn_mode=='Bahdanau':
             attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(
                 num_units=self.num_units,
                 memory=memory,
@@ -241,7 +238,6 @@ class seq2seq(object):
             input_feed[self.keep_prob] = self.train_keep_prob
         else:
             output_feed = [self.loss,
-                           # self.ppl,
                            # self.post_string,
                            # self.response_string,
                            # self.train_out,

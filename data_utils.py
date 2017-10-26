@@ -18,7 +18,7 @@ tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 
 tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", False, "share_emb")
-tf.app.flags.DEFINE_boolean("splited", True, "splited")
+tf.app.flags.DEFINE_boolean("split", True, "whether the data have been split in to train/dev/test")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
 
 tf.app.flags.DEFINE_integer("batch_size", 100, "batch_size")
@@ -35,6 +35,7 @@ tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iterat
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
 tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
+
 class data_process(object):
     def __init__(self,
                  tfFLAGS):
@@ -45,7 +46,7 @@ class data_process(object):
         self.valid_to = os.path.join(self.data_dir, 'valid_to')
         self.test_from = os.path.join(self.data_dir, 'test_from')
         self.test_to = os.path.join(self.data_dir, 'test_to')
-        if not tfFLAGS.splited:
+        if not tfFLAGS.split:
             self.data_from = os.path.join(self.data_dir,tfFLAGS.data_from)
             self.data_to = os.path.join(self.data_dir,tfFLAGS.data_to)
             self._split(tfFLAGS.train_size, tfFLAGS.valid_size, tfFLAGS.test_size)
@@ -197,8 +198,14 @@ def main(unused_argv):
             train_loss = 0
             time_step = 0
             while True:
-                global_step = s2s.global_step.eval()
-                if global_step % FLAGS.save_every_n_iteration == 1:
+                start_time = time.time()
+
+                train_batch = dp.train_batch(train_data, FLAGS.batch_size)
+                train_op, loss, global_step = s2s.step(sess, train_batch, is_train=True)
+                train_loss += loss
+                time_step += (time.time() - start_time)
+
+                if global_step % FLAGS.save_every_n_iteration == 0:
                     time_step /= FLAGS.save_every_n_iteration
                     train_loss /= FLAGS.save_every_n_iteration
                     summary = tf.Summary()
@@ -222,13 +229,6 @@ def main(unused_argv):
                     summary.value.add(tag='valid ppl', simple_value=np.exp(valid_loss))
                     valid_writer.add_summary(summary, global_step)
                     print "valid loss:", valid_loss, "valid ppl:", np.exp(valid_loss)
-
-                start_time = time.time()
-
-                train_batch = dp.train_batch(train_data, FLAGS.batch_size)
-                train_op, loss, global_step = s2s.step(sess, train_batch, is_train=True)
-                train_loss += loss
-                time_step += (time.time() - start_time)
 
         else:
             s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
