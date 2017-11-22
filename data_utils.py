@@ -6,33 +6,38 @@ import numpy as np
 from tensorflow.python.framework import constant_op
 import time
 from seq2seq import seq2seq, _START_VOCAB, _PAD, _EOS
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_string("data_from", "MSCOCO.p1.train", "data_from")
-tf.app.flags.DEFINE_string("data_to", "MSCOCO.p2.train", "data_to")
-tf.app.flags.DEFINE_string("data_dir", "./data", "data_dir")
+tf.app.flags.DEFINE_string("data_from", "weibo_pair.post", "data_from")
+tf.app.flags.DEFINE_string("data_to", "weibo_pair.response", "data_to")
+tf.app.flags.DEFINE_boolean("split", True, "whether the data have been split in to train/dev/test")
+tf.app.flags.DEFINE_integer("train_size", 100000, "train_size")
+tf.app.flags.DEFINE_integer("valid_size", 10000, "valid_size")
+tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
+tf.app.flags.DEFINE_string("word_vector", "vector.txt", "word vector")
+
+tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
 tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
 tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 
 tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
-tf.app.flags.DEFINE_boolean("share_emb", False, "share_emb")
-tf.app.flags.DEFINE_boolean("split", True, "whether the data have been split in to train/dev/test")
+tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
 
-tf.app.flags.DEFINE_integer("batch_size", 100, "batch_size")
-tf.app.flags.DEFINE_integer("embed_size", 128, "embed_size")
+tf.app.flags.DEFINE_integer("batch_size", 128, "batch_size")
+tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
 tf.app.flags.DEFINE_integer("num_units", 512, "num_units")
 tf.app.flags.DEFINE_integer("num_layers", 4, "num_layers")
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
-tf.app.flags.DEFINE_integer("train_size", 206902, "train_size")
-tf.app.flags.DEFINE_integer("valid_size", 10000, "valid_size")
-tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
+# tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
+# tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
 tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
 
@@ -40,12 +45,12 @@ class data_process(object):
     def __init__(self,
                  tfFLAGS):
         self.data_dir = tfFLAGS.data_dir
-        self.train_from = os.path.join(self.data_dir, 'train_from')
-        self.train_to = os.path.join(self.data_dir, 'train_to')
-        self.valid_from = os.path.join(self.data_dir, 'valid_from')
-        self.valid_to = os.path.join(self.data_dir, 'valid_to')
-        self.test_from = os.path.join(self.data_dir, 'test_from')
-        self.test_to = os.path.join(self.data_dir, 'test_to')
+        self.train_from = os.path.join(self.data_dir, 'gen/train_from')
+        self.train_to = os.path.join(self.data_dir, 'gen/train_to')
+        self.valid_from = os.path.join(self.data_dir, 'gen/valid_from')
+        self.valid_to = os.path.join(self.data_dir, 'gen/valid_to')
+        self.test_from = os.path.join(self.data_dir, 'gen/test_from')
+        self.test_to = os.path.join(self.data_dir, 'gen/test_to')
         if not tfFLAGS.split:
             self.data_from = os.path.join(self.data_dir,tfFLAGS.data_from)
             self.data_to = os.path.join(self.data_dir,tfFLAGS.data_to)
@@ -101,7 +106,33 @@ class data_process(object):
         vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
         if len(vocab_list) > self.vocab_size:
             vocab_list = vocab_list[:self.vocab_size]
-        return vocab_list
+
+        if not os.path.exists(FLAGS.word_vector):
+            print("Cannot find word vectors")
+            embed = None
+            return vocab_list, embed
+
+        print("Loading word vectors...")
+        vectors = {}
+        with open(FLAGS.word_vector) as f:
+            for i, line in enumerate(f):
+                if i % 100000 == 0:
+                    print("    processing line %d" % i)
+                s = line.strip()
+                word = s[:s.find(' ')]
+                vector = s[s.find(' ') + 1:]
+                vectors[word] = vector
+
+        embed = []
+        for word in vocab_list:
+            if word in vectors:
+                vector = map(float, vectors[word].split())
+            else:
+                vector = np.zeros(FLAGS.embed_units, dtype=np.float32)
+            embed.append(vector)
+        embed = np.array(embed, dtype=np.float32)
+
+        return vocab_list, embed
 
     def load_train_data(self):
         return self.load_data(self.train_from,self.train_to)
@@ -164,72 +195,97 @@ class data_process(object):
         while True:
             infer_data = {}
             infer_data['post'] = raw_input('post > ').strip().split()
-            infer_data['response'] = ''.strip().split()
+            infer_data['response'] = '233'.strip().split()
             infer_data = [infer_data]
             batch = self.gen_batched_data(infer_data)
-            res = sess.run([s2s.inference, s2s.beam_out], batch)
+            input_feed = {
+                s2s.post_string: batch['post'],
+                s2s.post_len: batch['post_len'],
+                s2s.response_string: batch['response'],
+                s2s.response_len: batch['response_len']
+            }
+            res = sess.run([s2s.inference, s2s.beam_out], input_feed)
             print 'inference > ' + ' '.join(res[0][0])
             print 'beam > ' + ' '.join(res[1][0, :, 0])
 
 
 def main(unused_argv):
-
-    # config = tf.ConfigProto()
-    # config.gpu_options.allow_growth = True
     dp = data_process(FLAGS)
     train_data = dp.load_train_data()
     valid_data = dp.load_valid_data()
     test_data = dp.load_test_data()
+    vocab, embed = dp.build_vocab(train_data)
+    print(FLAGS.__flags)
 
-    s2s = seq2seq(FLAGS)
-    with tf.Session() as sess:
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    with tf.Session(config=config) as sess:
+        s2s = seq2seq(embed=embed,tfFLAGS=FLAGS)
         if FLAGS.is_train:
             if tf.train.get_checkpoint_state(FLAGS.train_dir):
                 print("Reading model parameters from %s" % FLAGS.train_dir)
                 s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
+                train_writer = tf.summary.FileWriter(os.path.join(FLAGS.log_dir, 'train'))
             else:
                 print("Created model with fresh parameters.")
-                vocab = dp.build_vocab(train_data)
                 s2s.initialize(sess, vocab=vocab)
+                train_writer = tf.summary.FileWriter(os.path.join(FLAGS.log_dir, 'train'), sess.graph)
 
-            train_writer = tf.summary.FileWriter(os.path.join(FLAGS.train_dir, 'train'), sess.graph)
-            valid_writer = tf.summary.FileWriter(os.path.join(FLAGS.train_dir, 'valid'))
+            valid_writer = tf.summary.FileWriter(os.path.join(FLAGS.log_dir, 'valid'))
+            loss_placeholder = tf.placeholder(tf.float32)
+            loss_summary_op = tf.summary.scalar('loss', loss_placeholder)
+            ppl_op = tf.exp(loss_placeholder)
+            ppl_summary_op = tf.summary.scalar('ppl', ppl_op)
 
             train_loss = 0
             time_step = 0
+            # previous_losses = [1e18] * 3
             while True:
                 start_time = time.time()
 
                 train_batch = dp.train_batch(train_data, FLAGS.batch_size)
-                train_op, loss, global_step = s2s.step(sess, train_batch, is_train=True)
+                train_op, loss = s2s.step(sess, train_batch, is_train=True)
+                # print ' '.join(p[0])
+                # print ' '.join(r[0])
+                # print ' '.join(t[0])
+                # print ' '.join(i[0])
+                # print ' '.join(b[0,:,0])
+
+                # raw_input()
+                global_step = s2s.global_step.eval()
                 train_loss += loss
                 time_step += (time.time() - start_time)
 
                 if global_step % FLAGS.save_every_n_iteration == 0:
                     time_step /= FLAGS.save_every_n_iteration
                     train_loss /= FLAGS.save_every_n_iteration
-                    summary = tf.Summary()
-                    summary.value.add(tag='train loss', simple_value=train_loss)
-                    summary.value.add(tag='train ppl', simple_value=np.exp(train_loss))
-                    train_writer.add_summary(summary=summary, global_step=global_step)
-                    print("global step %d step-time %.4f train loss %f perplexity %f"
-                          % (global_step, time_step, train_loss, np.exp(train_loss)))
+
+                    # if train_loss > max(previous_losses):
+                    #     sess.run(s2s.learning_rate_decay_op)
+                    # previous_losses = previous_losses[1:] + [train_loss]
+
+                    loss, ppl = sess.run([loss_summary_op, ppl_summary_op],
+                                         feed_dict={loss_placeholder:train_loss})
+                    train_writer.add_summary(summary=loss, global_step=global_step)
+                    train_writer.add_summary(summary=ppl, global_step=global_step)
+                    print("global step %d step-time %.4f train loss %f perplexity %f learning_rate %f"
+                          % (global_step, time_step, train_loss, np.exp(train_loss), s2s.learning_rate))
                     train_loss = 0
                     time_step = 0
-
-                    s2s.saver.save(sess, "%s/model.ckpt" % FLAGS.train_dir, global_step=global_step)
 
                     valid_loss = 0
                     for batch in dp.eval_batches(valid_data,FLAGS.batch_size):
                         [loss] = s2s.step(sess, batch, is_train=False)
                         valid_loss += loss
                     valid_loss /= FLAGS.valid_size // FLAGS.batch_size
-                    summary = tf.Summary()
-                    summary.value.add(tag='valid loss', simple_value=valid_loss)
-                    summary.value.add(tag='valid ppl', simple_value=np.exp(valid_loss))
-                    valid_writer.add_summary(summary, global_step)
+
+                    loss, ppl = sess.run([loss_summary_op, ppl_summary_op],
+                                         feed_dict={loss_placeholder: valid_loss})
+                    valid_writer.add_summary(summary=loss, global_step=global_step)
+                    valid_writer.add_summary(summary=ppl, global_step=global_step)
                     print "valid loss:", valid_loss, "valid ppl:", np.exp(valid_loss)
 
+                    s2s.saver.save(sess, "%s/model.ckpt" % FLAGS.train_dir, global_step=global_step)
         else:
             s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
             dp.infer(s2s, sess)

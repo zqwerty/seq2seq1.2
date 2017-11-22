@@ -16,7 +16,9 @@ UNK_ID = 3
 
 
 class seq2seq(object):
-    def __init__(self, tfFLAGS):
+    def __init__(self,
+                 embed,
+                 tfFLAGS):
         self.vocab_size = tfFLAGS.vocab_size
         self.embed_size = tfFLAGS.embed_size
         self.num_units = tfFLAGS.num_units
@@ -25,25 +27,29 @@ class seq2seq(object):
         self.use_lstm = tfFLAGS.use_lstm
         self.attn_mode = tfFLAGS.attn_mode
         self.share_emb = tfFLAGS.share_emb
-        self.learning_rate = tfFLAGS.learning_rate
         self.train_keep_prob = tfFLAGS.keep_prob
-        self.global_step = tf.Variable(1, name="global_step", trainable=False)
-        self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
+        self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        # self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
         self.max_gradient_norm = 5.0
+        self.learning_rate = tfFLAGS.learning_rate
+        # self.learning_rate = tf.Variable(float(tfFLAGS.learning_rate),
+        #                                  trainable=False, dtype=tf.float32)
+        # self.learning_rate_decay_op = self.learning_rate.assign(
+        #     self.learning_rate * tfFLAGS.learning_rate_decay_factor)
 
-        self._make_input()
+        self._make_input(embed)
 
         with tf.variable_scope("input"):
             self.output_layer = Dense(self.vocab_size,
                                       kernel_initializer=tf.truncated_normal_initializer(stddev=0.1))
         self._build_encoder()
         self._build_decoder()
-        self.saver = tf.train.Saver()
-        print tfFLAGS
+        self.saver = tf.train.Saver(write_version=tf.train.SaverDef.V2,
+                                    max_to_keep=3, pad_step_number=True, keep_checkpoint_every_n_hours=1.0)
         for var in tf.trainable_variables():
             print var
 
-    def _make_input(self):
+    def _make_input(self, embed):
         with tf.variable_scope("input"):
             self.symbol2index = MutableHashTable(
                 key_dtype=tf.string,
@@ -60,8 +66,8 @@ class seq2seq(object):
                 name="out_table",
                 checkpoint=True)
 
-            self.post_string = tf.placeholder(tf.string,(None,None),'post')
-            self.response_string = tf.placeholder(tf.string, (None, None), 'response')
+            self.post_string = tf.placeholder(tf.string,(None,None),'post_string')
+            self.response_string = tf.placeholder(tf.string, (None, None), 'response_string')
 
             self.post = self.symbol2index.lookup(self.post_string)
             self.post_len = tf.placeholder(tf.int32, (None,), 'post_len')
@@ -70,16 +76,28 @@ class seq2seq(object):
 
             with tf.variable_scope("embedding") as scope:
                 if self.share_emb:
-                    self.emb_enc = self.emb_dec = tf.get_variable(
-                        "emb_share", [self.vocab_size, self.embed_size], dtype=tf.float32
-                    )
+                    if embed is None:
+                        # initialize the embedding randomly
+                        self.emb_enc = self.emb_dec = tf.get_variable(
+                            "emb_share", [self.vocab_size, self.embed_size], dtype=tf.float32
+                        )
+                    else:
+                        # initialize the embedding by pre-trained word vectors
+                        self.emb_enc = self.emb_dec = tf.get_variable('emb_share', dtype=tf.float32, initializer=embed)
+
                 else:
-                    self.emb_enc = tf.get_variable(
-                        "emb_enc", [self.vocab_size, self.embed_size], dtype=tf.float32
-                    )
-                    self.emb_dec = tf.get_variable(
-                        "emb_dec", [self.vocab_size, self.embed_size], dtype=tf.float32
-                    )
+                    if embed is None:
+                        # initialize the embedding randomly
+                        self.emb_enc = tf.get_variable(
+                            "emb_enc", [self.vocab_size, self.embed_size], dtype=tf.float32
+                        )
+                        self.emb_dec = tf.get_variable(
+                            "emb_dec", [self.vocab_size, self.embed_size], dtype=tf.float32
+                        )
+                    else:
+                        # initialize the embedding by pre-trained word vectors
+                        self.emb_enc = tf.get_variable("emb_enc", dtype=tf.float32, initializer=embed)
+                        self.emb_dec = tf.get_variable("emb_dec", dtype=tf.float32, initializer=embed)
 
             self.enc_inp = tf.nn.embedding_lookup(self.emb_enc, self.post)
 
@@ -128,11 +146,12 @@ class seq2seq(object):
             params = tf.trainable_variables()
             gradients = tf.gradients(self.loss, params)
             clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+            # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
-            self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params))
+            self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
             # self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
-            self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id,tf.int64))
+            self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id, tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
             dec_cell = self._build_decoder_cell(self.enc_outputs, self.post_len)
@@ -155,7 +174,7 @@ class seq2seq(object):
                 decoder=infer_decoder
             )
 
-            self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id,tf.int64))
+            self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
             dec_init_state = tf.contrib.seq2seq.tile_batch(dec_init_state, self.beam_width)
@@ -184,16 +203,16 @@ class seq2seq(object):
 
     def _build_encoder_cell(self):
         if self.use_lstm:
-            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units),self.keep_prob) for _ in range(self.num_layers)])
+            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         else:
-            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units),self.keep_prob) for _ in range(self.num_layers)])
+            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         return cell
 
     def _build_decoder_cell(self,memory,memory_len):
         if self.use_lstm:
-            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units),self.keep_prob) for _ in range(self.num_layers)])
+            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         else:
-            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units),self.keep_prob) for _ in range(self.num_layers)])
+            cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         if self.attn_mode=='Luong':
             attention_mechanism = tf.contrib.seq2seq.LuongAttention(
                 num_units=self.num_units,
@@ -208,6 +227,8 @@ class seq2seq(object):
                 memory_sequence_length=memory_len,
                 scale=True
             )
+        else:
+            return cell
         attn_cell = tf.contrib.seq2seq.AttentionWrapper(
             cell=cell,
             attention_mechanism=attention_mechanism,
@@ -233,7 +254,12 @@ class seq2seq(object):
         if is_train:
             output_feed = [self.train_op,
                            self.loss,
-                           self.step_inc,
+                           # self.step_inc,
+                           # self.post_string,
+                           # self.response_string,
+                           # self.train_out,
+                           # self.inference,
+                           # self.beam_out,
                            ]
             input_feed[self.keep_prob] = self.train_keep_prob
         else:
