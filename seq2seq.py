@@ -29,13 +29,8 @@ class seq2seq(object):
         self.share_emb = tfFLAGS.share_emb
         self.train_keep_prob = tfFLAGS.keep_prob
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        # self.step_inc = tf.assign(self.global_step, tf.add(self.global_step, tf.constant(1)))
         self.max_gradient_norm = 5.0
         self.learning_rate = tfFLAGS.learning_rate
-        # self.learning_rate = tf.Variable(float(tfFLAGS.learning_rate),
-        #                                  trainable=False, dtype=tf.float32)
-        # self.learning_rate_decay_op = self.learning_rate.assign(
-        #     self.learning_rate * tfFLAGS.learning_rate_decay_factor)
 
         self._make_input(embed)
 
@@ -149,7 +144,6 @@ class seq2seq(object):
             # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
             self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
-            # self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
             self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id, tf.int64))
 

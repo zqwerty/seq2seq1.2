@@ -36,8 +36,6 @@ tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
 tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
 
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
-# tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
-# tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
 tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
 
@@ -239,19 +237,12 @@ def main(unused_argv):
 
             train_loss = 0
             time_step = 0
-            # previous_losses = [1e18] * 3
             while True:
                 start_time = time.time()
 
                 train_batch = dp.train_batch(train_data, FLAGS.batch_size)
                 train_op, loss = s2s.step(sess, train_batch, is_train=True)
-                # print ' '.join(p[0])
-                # print ' '.join(r[0])
-                # print ' '.join(t[0])
-                # print ' '.join(i[0])
-                # print ' '.join(b[0,:,0])
 
-                # raw_input()
                 global_step = s2s.global_step.eval()
                 train_loss += loss
                 time_step += (time.time() - start_time)
@@ -259,10 +250,6 @@ def main(unused_argv):
                 if global_step % FLAGS.save_every_n_iteration == 0:
                     time_step /= FLAGS.save_every_n_iteration
                     train_loss /= FLAGS.save_every_n_iteration
-
-                    # if train_loss > max(previous_losses):
-                    #     sess.run(s2s.learning_rate_decay_op)
-                    # previous_losses = previous_losses[1:] + [train_loss]
 
                     loss, ppl = sess.run([loss_summary_op, ppl_summary_op],
                                          feed_dict={loss_placeholder:train_loss})
