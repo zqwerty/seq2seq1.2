@@ -6,24 +6,25 @@ import numpy as np
 from tensorflow.python.framework import constant_op
 import time
 from seq2seq import seq2seq, _START_VOCAB, _PAD, _EOS
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string("data_from", "weibo_pair.post", "data_from")
 tf.app.flags.DEFINE_string("data_to", "weibo_pair.response", "data_to")
 tf.app.flags.DEFINE_boolean("split", True, "whether the data have been split in to train/dev/test")
-tf.app.flags.DEFINE_integer("train_size", 100000, "train_size")
+tf.app.flags.DEFINE_integer("train_size", 900000, "train_size")
 tf.app.flags.DEFINE_integer("valid_size", 10000, "valid_size")
 tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
-tf.app.flags.DEFINE_string("word_vector", "vector.txt", "word vector")
+tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./train90wAdam", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./log90wAdam", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
+tf.app.flags.DEFINE_string("opt", "Adam", "optimizer")
 
-tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
+tf.app.flags.DEFINE_boolean("use_lstm", False, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
 
@@ -35,7 +36,8 @@ tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
 tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
 
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "learning rate")
+tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
+tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
 tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
 
@@ -43,12 +45,12 @@ class data_process(object):
     def __init__(self,
                  tfFLAGS):
         self.data_dir = tfFLAGS.data_dir
-        self.train_from = os.path.join(self.data_dir, 'gen/train_from')
-        self.train_to = os.path.join(self.data_dir, 'gen/train_to')
-        self.valid_from = os.path.join(self.data_dir, 'gen/valid_from')
-        self.valid_to = os.path.join(self.data_dir, 'gen/valid_to')
-        self.test_from = os.path.join(self.data_dir, 'gen/test_from')
-        self.test_to = os.path.join(self.data_dir, 'gen/test_to')
+        self.train_from = os.path.join(self.data_dir, 'gen/train90w_from')
+        self.train_to = os.path.join(self.data_dir, 'gen/train90w_to')
+        self.valid_from = os.path.join(self.data_dir, 'gen/valid90w_from')
+        self.valid_to = os.path.join(self.data_dir, 'gen/valid90w_to')
+        self.test_from = os.path.join(self.data_dir, 'gen/test90w_from')
+        self.test_to = os.path.join(self.data_dir, 'gen/test90w_to')
         if not tfFLAGS.split:
             self.data_from = os.path.join(self.data_dir,tfFLAGS.data_from)
             self.data_to = os.path.join(self.data_dir,tfFLAGS.data_to)
@@ -79,7 +81,9 @@ class data_process(object):
                 else:
                     train_from.write(post)
                     train_to.write(resp)
-                cntline+=1
+                cntline += 1
+                if cntline == total_size:
+                    break
 
         train_from.close()
         train_to.close()
@@ -122,13 +126,16 @@ class data_process(object):
                 vectors[word] = vector
 
         embed = []
+        pre_vector = 0
         for word in vocab_list:
             if word in vectors:
                 vector = map(float, vectors[word].split())
+                pre_vector += 1
             else:
-                vector = np.zeros(FLAGS.embed_units, dtype=np.float32)
+                vector = np.zeros(FLAGS.embed_size, dtype=np.float32)
             embed.append(vector)
         embed = np.array(embed, dtype=np.float32)
+        print ("%d word vectors pre-trained" % pre_vector)
 
         return vocab_list, embed
 
@@ -204,7 +211,8 @@ class data_process(object):
             }
             res = sess.run([s2s.inference, s2s.beam_out], input_feed)
             print 'inference > ' + ' '.join(res[0][0])
-            print 'beam > ' + ' '.join(res[1][0, :, 0])
+            for i in range(FLAGS.beam_width):
+                print 'beam > ' + ' '.join(res[1][0, :, i])
 
 
 def main(unused_argv):
@@ -256,7 +264,11 @@ def main(unused_argv):
                     train_writer.add_summary(summary=loss, global_step=global_step)
                     train_writer.add_summary(summary=ppl, global_step=global_step)
                     print("global step %d step-time %.4f train loss %f perplexity %f learning_rate %f"
-                          % (global_step, time_step, train_loss, np.exp(train_loss), s2s.learning_rate))
+                          % (global_step,
+                             time_step,
+                             train_loss,
+                             np.exp(train_loss),
+                             s2s.learning_rate.eval() if FLAGS.opt=='SGD' else .0))
                     train_loss = 0
                     time_step = 0
 

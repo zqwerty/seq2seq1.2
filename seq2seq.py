@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.python.layers.core import Dense
 from tensorflow.python.framework import constant_op
+from tensorflow.python.ops import variable_scope
 
 _PAD = b"PAD"
 _GO = b"GO"
@@ -30,7 +31,16 @@ class seq2seq(object):
         self.train_keep_prob = tfFLAGS.keep_prob
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.max_gradient_norm = 5.0
-        self.learning_rate = tfFLAGS.learning_rate
+        self.num_samples = 512
+        if tfFLAGS.opt == 'SGD':
+            self.learning_rate = tf.Variable(float(tfFLAGS.learning_rate),
+                                             trainable=False, dtype=tf.float32)
+            self.learning_rate_decay_op = self.learning_rate.assign(
+                self.learning_rate * tfFLAGS.learning_rate_decay_factor)
+            self.opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+        else:
+            self.learning_rate = tfFLAGS.learning_rate
+            self.opt = tf.train.AdamOptimizer()
 
         self._make_input(embed)
 
@@ -40,7 +50,7 @@ class seq2seq(object):
         self._build_encoder()
         self._build_decoder()
         self.saver = tf.train.Saver(write_version=tf.train.SaverDef.V2,
-                                    max_to_keep=3, pad_step_number=True, keep_checkpoint_every_n_hours=1.0)
+                                    max_to_keep=1, pad_step_number=True, keep_checkpoint_every_n_hours=1.0)
         for var in tf.trainable_variables():
             print var
 
@@ -78,6 +88,7 @@ class seq2seq(object):
                         )
                     else:
                         # initialize the embedding by pre-trained word vectors
+                        print "share pre-trained embed"
                         self.emb_enc = self.emb_dec = tf.get_variable('emb_share', dtype=tf.float32, initializer=embed)
 
                 else:
@@ -133,17 +144,32 @@ class seq2seq(object):
             train_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
                 decoder=train_decoder,
             )
+            # logits = train_output.rnn_output
 
             mask = tf.sequence_mask(self.response_len, self.batch_len, dtype=tf.float32)
             self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output, self.response, mask)
+
+            # mask = tf.reshape(tf.cumsum(tf.one_hot(self.response_len-1,
+            #                                        self.batch_len), reverse=True, axis=1), [-1, self.batch_len])
+            # self.loss = sampled_sequence_loss(train_output.rnn_output,
+            #                                   self.response,
+            #                                   mask,
+            #                                   self.num_units,
+            #                                   self.vocab_size,
+            #                                   self.num_samples)
+            # crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
+            #     labels=self.response, logits=logits)
+            # train_loss = (tf.reduce_sum(crossent * target_weights) /
+            #               batch_size)
+            # self.loss = tf.reduce_sum(crossent * mask) / tf.to_float(self.batch_size)
 
             # Calculate and clip gradients
             params = tf.trainable_variables()
             gradients = tf.gradients(self.loss, params)
             clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
             # optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-            optimizer = tf.train.AdamOptimizer(self.learning_rate)
-            self.train_op = optimizer.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+            # optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            self.train_op = self.opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
             self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id, tf.int64))
 
@@ -265,3 +291,24 @@ class seq2seq(object):
                            # self.beam_out,
                            ]
         return sess.run(output_feed, input_feed)
+
+
+def sampled_sequence_loss(outputs, targets, masks, num_units, num_symbols, num_samples):
+    name = "output_projection"
+    with variable_scope.variable_scope('decoder_rnn/%s' % name):
+        weights = tf.transpose(tf.get_variable("weights", [num_units, num_symbols]))
+        bias = tf.get_variable("biases", [num_symbols])
+
+        local_labels = tf.reshape(targets, [-1, 1])
+        local_outputs = tf.reshape(outputs, [-1, num_units])
+        local_masks = tf.reshape(masks, [-1])
+
+        local_loss = tf.nn.sampled_softmax_loss(weights, bias, local_labels,
+                                                local_outputs, num_samples, num_symbols)
+        local_loss = local_loss * local_masks
+
+        loss = tf.reduce_sum(local_loss)
+        total_size = tf.reduce_sum(local_masks)
+        total_size += 1e-12  # to avoid division by 0 for all-0 weights
+
+        return loss / total_size
