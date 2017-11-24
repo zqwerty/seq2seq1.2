@@ -6,7 +6,7 @@ import numpy as np
 from tensorflow.python.framework import constant_op
 import time
 from seq2seq import seq2seq, _START_VOCAB, _PAD, _EOS
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -19,12 +19,12 @@ tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./train90wAdam", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./log90wAdam", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./train90w", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./log90w", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
-tf.app.flags.DEFINE_string("opt", "Adam", "optimizer")
+tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 
-tf.app.flags.DEFINE_boolean("use_lstm", False, "use_lstm")
+tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
 
@@ -245,6 +245,7 @@ def main(unused_argv):
 
             train_loss = 0
             time_step = 0
+            previous_losses = [1e18] * 3
             while True:
                 start_time = time.time()
 
@@ -258,6 +259,10 @@ def main(unused_argv):
                 if global_step % FLAGS.save_every_n_iteration == 0:
                     time_step /= FLAGS.save_every_n_iteration
                     train_loss /= FLAGS.save_every_n_iteration
+
+                    if FLAGS.opt == 'SGD' and train_loss > max(previous_losses):
+                        sess.run(s2s.learning_rate_decay_op)
+                    previous_losses = previous_losses[1:] + [train_loss]
 
                     loss, ppl = sess.run([loss_summary_op, ppl_summary_op],
                                          feed_dict={loss_placeholder:train_loss})
