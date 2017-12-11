@@ -38,7 +38,7 @@ tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iterat
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
-tf.app.flags.DEFINE_float("keep_prob", 1, "keep_prob")
+tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
 
 class data_process(object):
