@@ -2,7 +2,6 @@ import tensorflow as tf
 from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.python.layers.core import Dense
 from tensorflow.python.framework import constant_op
-from tensorflow.python.ops import variable_scope
 
 _PAD = b"PAD"
 _GO = b"GO"
@@ -18,8 +17,8 @@ UNK_ID = 3
 
 class seq2seq(object):
     def __init__(self,
-                 embed,
-                 tfFLAGS):
+                 tfFLAGS,
+                 embed=None):
         self.vocab_size = tfFLAGS.vocab_size
         self.embed_size = tfFLAGS.embed_size
         self.num_units = tfFLAGS.num_units
@@ -29,9 +28,9 @@ class seq2seq(object):
         self.attn_mode = tfFLAGS.attn_mode
         self.share_emb = tfFLAGS.share_emb
         self.train_keep_prob = tfFLAGS.keep_prob
+        self.max_decode_len = tfFLAGS.max_decode_len
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.max_gradient_norm = 5.0
-        self.num_samples = 512
         if tfFLAGS.opt == 'SGD':
             self.learning_rate = tf.Variable(float(tfFLAGS.learning_rate),
                                              trainable=False, dtype=tf.float32)
@@ -101,7 +100,7 @@ class seq2seq(object):
                             "emb_dec", [self.vocab_size, self.embed_size], dtype=tf.float32
                         )
                     else:
-                        # initialize the embedding by pre-trained word vectors
+                        # TODO initialize the embedding by pre-trained word vectors
                         self.emb_enc = tf.get_variable("emb_enc", dtype=tf.float32, initializer=embed)
                         self.emb_dec = tf.get_variable("emb_dec", dtype=tf.float32, initializer=embed)
 
@@ -143,6 +142,7 @@ class seq2seq(object):
             )
             train_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
                 decoder=train_decoder,
+                maximum_iterations=self.max_decode_len,
             )
             logits = train_output.rnn_output
 
@@ -185,7 +185,8 @@ class seq2seq(object):
                 output_layer=self.output_layer
             )
             infer_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
-                decoder=infer_decoder
+                decoder=infer_decoder,
+                maximum_iterations=self.max_decode_len,
             )
 
             self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64))
@@ -210,9 +211,9 @@ class seq2seq(object):
             )
             beam_output, _, beam_lengths = tf.contrib.seq2seq.dynamic_decode(
                 decoder=beam_decoder,
+                maximum_iterations=self.max_decode_len,
             )
 
-            self.beam_shape = tf.shape(beam_output.predicted_ids)
             self.beam_out = self.index2symbol.lookup(tf.cast(beam_output.predicted_ids, tf.int64))
 
     def _build_encoder_cell(self):
@@ -268,7 +269,6 @@ class seq2seq(object):
         if is_train:
             output_feed = [self.train_op,
                            self.loss,
-                           # self.step_inc,
                            # self.post_string,
                            # self.response_string,
                            # self.train_out,

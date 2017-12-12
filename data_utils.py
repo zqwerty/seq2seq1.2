@@ -23,6 +23,7 @@ tf.app.flags.DEFINE_string("train_dir", "./train_sen_loss", "train_dir")
 tf.app.flags.DEFINE_string("log_dir", "./log_sen_loss", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
+tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
 
 tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
@@ -33,6 +34,7 @@ tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
 tf.app.flags.DEFINE_integer("num_units", 512, "num_units")
 tf.app.flags.DEFINE_integer("num_layers", 4, "num_layers")
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
+tf.app.flags.DEFINE_integer("max_decode_len", 32, "max_decode_len")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
 tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
 
@@ -197,37 +199,74 @@ class data_process(object):
     def infer(self,
               s2s,
               sess):
-        while True:
-            infer_data = {}
-            infer_data['post'] = raw_input('post > ').strip().split()
-            infer_data['response'] = '233'.strip().split()
-            infer_data = [infer_data]
-            batch = self.gen_batched_data(infer_data)
-            input_feed = {
-                s2s.post_string: batch['post'],
-                s2s.post_len: batch['post_len'],
-                s2s.response_string: batch['response'],
-                s2s.response_len: batch['response_len']
-            }
-            res = sess.run([s2s.inference, s2s.beam_out], input_feed)
-            print 'inference > ' + ' '.join(res[0][0])
-            for i in range(FLAGS.beam_width):
-                print 'beam > ' + ' '.join(res[1][0, :, i])
+        def cut_eos(sentence):
+            if sentence.find('EOS') != -1:
+                return sentence[:sentence.find('EOS')]
+            return sentence
+        if FLAGS.infer_path is not "":
+            f1 = open(FLAGS.infer_path)
+            post = [line.strip().split() for line in f1]
+            f1.close()
+            f2 = open(FLAGS.infer_path+'.infer', 'wb')
+
+            data = []
+            for p in post:
+                data.append({'post': p, 'response': []})
+
+            id = 0
+            for j in range((len(data)+FLAGS.batch_size-1) // FLAGS.batch_size):
+                batch = self.gen_batched_data(data[j * FLAGS.batch_size:(j + 1) * FLAGS.batch_size])
+                input_feed = {
+                    s2s.post_string: batch['post'],
+                    s2s.post_len: batch['post_len'],
+                    s2s.response_string: batch['response'],
+                    s2s.response_len: batch['response_len']
+                }
+                res = sess.run([s2s.inference, s2s.beam_out], input_feed)
+                print id
+                for i in range(len(batch['post_len'])):
+                    print >> f2, 'post: ' + ' '.join(post[id])
+                    print >> f2, 'infer: ' + cut_eos(' '.join(res[0][i]))
+                    print >> f2, 'beam: ' + cut_eos(' '.join(res[1][i, :, 0]))
+                    print >> f2, ''
+
+                    id += 1
+
+            f2.close()
+        else:
+            while True:
+                infer_data = {}
+                infer_data['post'] = raw_input('post > ').strip().split()
+                infer_data['response'] = '233'.strip().split()
+                infer_data = [infer_data]
+                batch = self.gen_batched_data(infer_data)
+                input_feed = {
+                    s2s.post_string: batch['post'],
+                    s2s.post_len: batch['post_len'],
+                    s2s.response_string: batch['response'],
+                    s2s.response_len: batch['response_len']
+                }
+                res = sess.run([s2s.inference, s2s.beam_out], input_feed)
+                inference = cut_eos(' '.join(res[0][0]))
+                beam_out = [cut_eos(' '.join(res[1][0, :, i])) for i in range(FLAGS.beam_width)]
+                print 'inference > ' + inference
+                for i in range(FLAGS.beam_width):
+                    print 'beam > ' + beam_out[i]
 
 
 def main(unused_argv):
     dp = data_process(FLAGS)
-    train_data = dp.load_train_data()
-    valid_data = dp.load_valid_data()
-    test_data = dp.load_test_data()
-    vocab, embed = dp.build_vocab(train_data)
     print(FLAGS.__flags)
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     with tf.Session(config=config) as sess:
-        s2s = seq2seq(embed=embed,tfFLAGS=FLAGS)
         if FLAGS.is_train:
+            train_data = dp.load_train_data()
+            valid_data = dp.load_valid_data()
+            test_data = dp.load_test_data()
+            vocab, embed = dp.build_vocab(train_data)
+            s2s = seq2seq(embed=embed, tfFLAGS=FLAGS)
             if tf.train.get_checkpoint_state(FLAGS.train_dir):
                 print("Reading model parameters from %s" % FLAGS.train_dir)
                 s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
@@ -291,7 +330,9 @@ def main(unused_argv):
 
                     s2s.saver.save(sess, "%s/model.ckpt" % FLAGS.train_dir, global_step=global_step)
         else:
-            s2s.saver.restore(sess, tf.train.latest_checkpoint(FLAGS.train_dir))
+            s2s = seq2seq(tfFLAGS=FLAGS)
+            s2s.saver.restore(sess,
+                              tf.train.latest_checkpoint(FLAGS.train_dir))
             dp.infer(s2s, sess)
 
 
