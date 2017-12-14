@@ -194,7 +194,8 @@ class seq2seq(object):
             enc_outputs = tf.contrib.seq2seq.tile_batch(self.enc_outputs, self.beam_width)
             post_len = tf.contrib.seq2seq.tile_batch(self.post_len, self.beam_width)
 
-            dec_cell, init_state = self._build_decoder_cell(enc_outputs, post_len, dec_init_state)
+            dec_cell, init_state = self._build_decoder_cell(enc_outputs, post_len, dec_init_state,
+                                                            beam_width=self.beam_width)
 
             beam_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
                 cell=dec_cell,
@@ -219,7 +220,7 @@ class seq2seq(object):
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         return cell
 
-    def _build_decoder_cell(self, memory, memory_len, encode_state):
+    def _build_decoder_cell(self, memory, memory_len, encode_state, beam_width=1):
         if self.use_lstm:
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         else:
@@ -245,7 +246,7 @@ class seq2seq(object):
             attention_mechanism=attention_mechanism,
             attention_layer_size=self.num_units,
         )
-        return attn_cell, attn_cell.zero_state(self.batch_size * self.beam_width, tf.float32).clone(
+        return attn_cell, attn_cell.zero_state(self.batch_size * beam_width, tf.float32).clone(
             cell_state=encode_state)
 
     def initialize(self, sess, vocab):
