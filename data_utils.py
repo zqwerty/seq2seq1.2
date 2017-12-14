@@ -19,8 +19,8 @@ tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./train_sen_loss", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./log_sen_loss", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
@@ -40,6 +40,7 @@ tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iterat
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
+tf.app.flags.DEFINE_float("momentum", 0.9, "momentum")
 tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
 
 

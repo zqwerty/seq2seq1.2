@@ -37,8 +37,9 @@ class seq2seq(object):
             self.learning_rate_decay_op = self.learning_rate.assign(
                 self.learning_rate * tfFLAGS.learning_rate_decay_factor)
             self.opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+        elif tfFLAGS.opt == 'Momentum':
+            self.opt = tf.train.MomentumOptimizer(learning_rate=tfFLAGS.learning_rate, momentum=tfFLAGS.momentum)
         else:
-            self.learning_rate = tfFLAGS.learning_rate
             self.opt = tf.train.AdamOptimizer()
 
         self._make_input(embed)
