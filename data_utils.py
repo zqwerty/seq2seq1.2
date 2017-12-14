@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
 tf.app.flags.DEFINE_integer("num_units", 512, "num_units")
 tf.app.flags.DEFINE_integer("num_layers", 4, "num_layers")
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
-tf.app.flags.DEFINE_integer("max_decode_len", 32, "max_decode_len")
+tf.app.flags.DEFINE_integer("max_decode_len", 128, "max_decode_len")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
 tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
 

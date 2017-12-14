@@ -125,11 +125,9 @@ class seq2seq(object):
             )
 
     def _build_decoder(self):
-        dec_init_state = self.enc_state
-
         with tf.variable_scope("decode"):
-            dec_cell = self._build_decoder_cell(self.enc_outputs, self.post_len)
-            init_state = dec_cell.zero_state(self.batch_size, tf.float32).clone(cell_state=dec_init_state)
+            dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state)
+
             train_helper = tf.contrib.seq2seq.TrainingHelper(
                 inputs=self.dec_inp,
                 sequence_length=self.response_len
@@ -168,8 +166,7 @@ class seq2seq(object):
             self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id, tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
-            dec_cell = self._build_decoder_cell(self.enc_outputs, self.post_len)
-            init_state = dec_cell.zero_state(self.batch_size, tf.float32).clone(cell_state=dec_init_state)
+            dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state)
 
             start_tokens = tf.tile(tf.constant([GO_ID], dtype=tf.int32), [self.batch_size])
             end_token = EOS_ID
@@ -192,13 +189,11 @@ class seq2seq(object):
             self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64))
 
         with tf.variable_scope("decode", reuse=True):
-            dec_init_state = tf.contrib.seq2seq.tile_batch(dec_init_state, self.beam_width)
+            dec_init_state = tf.contrib.seq2seq.tile_batch(self.enc_state, self.beam_width)
             enc_outputs = tf.contrib.seq2seq.tile_batch(self.enc_outputs, self.beam_width)
             post_len = tf.contrib.seq2seq.tile_batch(self.post_len, self.beam_width)
 
-            dec_cell = self._build_decoder_cell(enc_outputs, post_len)
-            init_state = dec_cell.zero_state(self.batch_size * self.beam_width, tf.float32).clone(
-                cell_state=dec_init_state)
+            dec_cell, init_state = self._build_decoder_cell(enc_outputs, post_len, dec_init_state)
 
             beam_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
                 cell=dec_cell,
@@ -223,7 +218,7 @@ class seq2seq(object):
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         return cell
 
-    def _build_decoder_cell(self,memory,memory_len):
+    def _build_decoder_cell(self, memory, memory_len, encode_state):
         if self.use_lstm:
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         else:
@@ -243,13 +238,14 @@ class seq2seq(object):
                 scale=True
             )
         else:
-            return cell
+            return cell, encode_state
         attn_cell = tf.contrib.seq2seq.AttentionWrapper(
             cell=cell,
             attention_mechanism=attention_mechanism,
             attention_layer_size=self.num_units,
         )
-        return attn_cell
+        return attn_cell, attn_cell.zero_state(self.batch_size * self.beam_width, tf.float32).clone(
+            cell_state=encode_state)
 
     def initialize(self, sess, vocab):
         op_in = self.symbol2index.insert(constant_op.constant(vocab),
