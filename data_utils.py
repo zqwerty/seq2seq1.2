@@ -19,8 +19,8 @@ tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./traint", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./logt", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
@@ -28,6 +28,7 @@ tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
 tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
+tf.app.flags.DEFINE_boolean("bi_encode", True, "bidirectional encoder")
 
 tf.app.flags.DEFINE_integer("batch_size", 128, "batch_size")
 tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
@@ -37,6 +38,7 @@ tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
 tf.app.flags.DEFINE_integer("max_decode_len", 128, "max_decode_len")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
 tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
+tf.app.flags.DEFINE_integer("max_iteration", 200000, "max_iteration")
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
@@ -330,6 +332,9 @@ def main(unused_argv):
                     print "valid loss:", valid_loss, "valid ppl:", np.exp(valid_loss)
 
                     s2s.saver.save(sess, "%s/model.ckpt" % FLAGS.train_dir, global_step=global_step)
+
+                if global_step >= FLAGS.max_iteration:
+                    break
         else:
             s2s = seq2seq(tfFLAGS=FLAGS)
             s2s.saver.restore(sess,

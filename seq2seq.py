@@ -29,18 +29,20 @@ class seq2seq(object):
         self.share_emb = tfFLAGS.share_emb
         self.train_keep_prob = tfFLAGS.keep_prob
         self.max_decode_len = tfFLAGS.max_decode_len
+        self.bi_encode = tfFLAGS.bi_encode
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.max_gradient_norm = 5.0
-        if tfFLAGS.opt == 'SGD':
-            self.learning_rate = tf.Variable(float(tfFLAGS.learning_rate),
-                                             trainable=False, dtype=tf.float32)
-            self.learning_rate_decay_op = self.learning_rate.assign(
-                self.learning_rate * tfFLAGS.learning_rate_decay_factor)
-            self.opt = tf.train.GradientDescentOptimizer(self.learning_rate)
-        elif tfFLAGS.opt == 'Momentum':
-            self.opt = tf.train.MomentumOptimizer(learning_rate=tfFLAGS.learning_rate, momentum=tfFLAGS.momentum)
-        else:
-            self.opt = tf.train.AdamOptimizer()
+        with tf.variable_scope("optimizer"):
+            if tfFLAGS.opt == 'SGD':
+                self.learning_rate = tf.Variable(float(tfFLAGS.learning_rate),
+                                                 trainable=False, dtype=tf.float32)
+                self.learning_rate_decay_op = self.learning_rate.assign(
+                    self.learning_rate * tfFLAGS.learning_rate_decay_factor)
+                self.opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+            elif tfFLAGS.opt == 'Momentum':
+                self.opt = tf.train.MomentumOptimizer(learning_rate=tfFLAGS.learning_rate, momentum=tfFLAGS.momentum)
+            else:
+                self.opt = tf.train.AdamOptimizer()
 
         self._make_input(embed)
 
@@ -116,17 +118,39 @@ class seq2seq(object):
             self.keep_prob = tf.placeholder_with_default(1.0, ())
 
     def _build_encoder(self):
-        with tf.variable_scope("encode"):
-            enc_cell = self._build_encoder_cell()
-            self.enc_outputs, self.enc_state = tf.nn.dynamic_rnn(
-                cell=enc_cell,
-                inputs=self.enc_inp,
-                sequence_length=self.post_len,
-                dtype=tf.float32
-            )
+        with tf.variable_scope("encode", initializer=tf.orthogonal_initializer()):
+            if self.bi_encode:
+                cell_fw, cell_bw = self._build_biencoder_cell()
+                outputs, states = tf.nn.bidirectional_dynamic_rnn(
+                    cell_fw=cell_fw,
+                    cell_bw=cell_bw,
+                    inputs=self.enc_inp,
+                    sequence_length=self.post_len,
+                    dtype=tf.float32
+                )
+                enc_outputs = tf.concat(outputs, axis=-1)
+                enc_state = []
+                for i in range(self.num_layers):
+                    if self.use_lstm:
+                        encoder_state_c = tf.concat([states[0][i].c,states[1][i].c], axis=-1)
+                        encoder_state_h = tf.concat([states[0][i].h,states[1][i].h], axis=-1)
+                        enc_state.append(tf.contrib.rnn.LSTMStateTuple(c=encoder_state_c, h=encoder_state_h))
+                    else:
+                        enc_state.append(tf.concat([states[0][i],states[1][i]], axis=-1))
+                enc_state = tuple(enc_state)
+                self.enc_outputs, self.enc_state = enc_outputs, enc_state
+            else:
+                enc_cell = self._build_encoder_cell()
+                enc_outputs, enc_state = tf.nn.dynamic_rnn(
+                    cell=enc_cell,
+                    inputs=self.enc_inp,
+                    sequence_length=self.post_len,
+                    dtype=tf.float32
+                )
+                self.enc_outputs, self.enc_state = enc_outputs, enc_state
 
     def _build_decoder(self):
-        with tf.variable_scope("decode"):
+        with tf.variable_scope("decode", initializer=tf.orthogonal_initializer()):
             dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state)
 
             train_helper = tf.contrib.seq2seq.TrainingHelper(
@@ -219,6 +243,19 @@ class seq2seq(object):
         else:
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         return cell
+
+    def _build_biencoder_cell(self):
+        if self.use_lstm:
+            cell_fw = tf.contrib.rnn.MultiRNNCell(
+                [tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units / 2), self.keep_prob) for _ in range(self.num_layers)])
+            cell_bw = tf.contrib.rnn.MultiRNNCell(
+                [tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units / 2), self.keep_prob) for _ in range(self.num_layers)])
+        else:
+            cell_fw = tf.contrib.rnn.MultiRNNCell(
+                [tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units / 2), self.keep_prob) for _ in range(self.num_layers)])
+            cell_bw = tf.contrib.rnn.MultiRNNCell(
+                [tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units / 2), self.keep_prob) for _ in range(self.num_layers)])
+        return cell_fw, cell_bw
 
     def _build_decoder_cell(self, memory, memory_len, encode_state, beam_width=1):
         if self.use_lstm:
