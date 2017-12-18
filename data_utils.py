@@ -19,11 +19,12 @@ tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./traint", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./logt", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
+tf.app.flags.DEFINE_string("save_para_path", "", "path of the trained model, default latest in train_dir")
 
 tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
@@ -37,7 +38,7 @@ tf.app.flags.DEFINE_integer("num_layers", 4, "num_layers")
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
 tf.app.flags.DEFINE_integer("max_decode_len", 128, "max_decode_len")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
-tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
+tf.app.flags.DEFINE_integer("save_every_n_iteration", 100, "save_every_n_iteration")
 tf.app.flags.DEFINE_integer("max_iteration", 200000, "max_iteration")
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
@@ -200,7 +201,6 @@ class data_process(object):
             yield batched_data
 
     def infer(self,
-              s2s,
               sess):
         def cut_eos(sentence):
             if sentence.find('EOS') != -1:
@@ -220,12 +220,12 @@ class data_process(object):
             for j in range((len(data)+FLAGS.batch_size-1) // FLAGS.batch_size):
                 batch = self.gen_batched_data(data[j * FLAGS.batch_size:(j + 1) * FLAGS.batch_size])
                 input_feed = {
-                    s2s.post_string: batch['post'],
-                    s2s.post_len: batch['post_len'],
-                    s2s.response_string: batch['response'],
-                    s2s.response_len: batch['response_len']
+                    'input/post_string:0': batch['post'],
+                    'input/post_len:0': batch['post_len'],
+                    'input/response_string:0': batch['response'],
+                    'input/response_len:0': batch['response_len']
                 }
-                res = sess.run([s2s.inference, s2s.beam_out], input_feed)
+                res = sess.run(['decode_1/inference:0', 'decode_2/beam_out:0'], input_feed)
                 print id
                 for i in range(len(batch['post_len'])):
                     print >> f2, 'post: ' + ' '.join(post[id])
@@ -244,12 +244,12 @@ class data_process(object):
                 infer_data = [infer_data]
                 batch = self.gen_batched_data(infer_data)
                 input_feed = {
-                    s2s.post_string: batch['post'],
-                    s2s.post_len: batch['post_len'],
-                    s2s.response_string: batch['response'],
-                    s2s.response_len: batch['response_len']
+                    'input/post_string:0': batch['post'],
+                    'input/post_len:0': batch['post_len'],
+                    'input/response_string:0': batch['response'],
+                    'input/response_len:0': batch['response_len']
                 }
-                res = sess.run([s2s.inference, s2s.beam_out], input_feed)
+                res = sess.run(['decode_1/inference:0', 'decode_2/beam_out:0'], input_feed)
                 inference = cut_eos(' '.join(res[0][0]))
                 beam_out = [cut_eos(' '.join(res[1][0, :, i])) for i in range(FLAGS.beam_width)]
                 print 'inference > ' + inference
@@ -336,10 +336,13 @@ def main(unused_argv):
                 if global_step >= FLAGS.max_iteration:
                     break
         else:
-            s2s = seq2seq(tfFLAGS=FLAGS)
-            s2s.saver.restore(sess,
-                              tf.train.latest_checkpoint(FLAGS.train_dir))
-            dp.infer(s2s, sess)
+            if FLAGS.save_para_path=='':
+                model_path = tf.train.latest_checkpoint(FLAGS.train_dir)
+            else:
+                model_path = FLAGS.save_para_path
+            saver = tf.train.import_meta_graph(model_path + '.meta')
+            saver.restore(sess, model_path)
+            dp.infer(sess)
 
 
 if __name__ == '__main__':

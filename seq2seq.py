@@ -57,22 +57,21 @@ class seq2seq(object):
             print var
 
     def _make_input(self, embed):
+        self.symbol2index = MutableHashTable(
+            key_dtype=tf.string,
+            value_dtype=tf.int64,
+            default_value=UNK_ID,
+            shared_name="in_table",
+            name="in_table",
+            checkpoint=True)
+        self.index2symbol = MutableHashTable(
+            key_dtype=tf.int64,
+            value_dtype=tf.string,
+            default_value=_UNK,
+            shared_name="out_table",
+            name="out_table",
+            checkpoint=True)
         with tf.variable_scope("input"):
-            self.symbol2index = MutableHashTable(
-                key_dtype=tf.string,
-                value_dtype=tf.int64,
-                default_value=UNK_ID,
-                shared_name="in_table",
-                name="in_table",
-                checkpoint=True)
-            self.index2symbol = MutableHashTable(
-                key_dtype=tf.int64,
-                value_dtype=tf.string,
-                default_value=_UNK,
-                shared_name="out_table",
-                name="out_table",
-                checkpoint=True)
-
             self.post_string = tf.placeholder(tf.string,(None,None),'post_string')
             self.response_string = tf.placeholder(tf.string, (None, None), 'response_string')
 
@@ -211,7 +210,7 @@ class seq2seq(object):
                 maximum_iterations=self.max_decode_len,
             )
 
-            self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64))
+            self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64), name='inference')
 
         with tf.variable_scope("decode", reuse=True):
             dec_init_state = tf.contrib.seq2seq.tile_batch(self.enc_state, self.beam_width)
@@ -235,7 +234,7 @@ class seq2seq(object):
                 maximum_iterations=self.max_decode_len,
             )
 
-            self.beam_out = self.index2symbol.lookup(tf.cast(beam_output.predicted_ids, tf.int64))
+            self.beam_out = self.index2symbol.lookup(tf.cast(beam_output.predicted_ids, tf.int64), name='beam_out')
 
     def _build_encoder_cell(self):
         if self.use_lstm:
