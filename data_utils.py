@@ -19,22 +19,22 @@ tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./train", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./log", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./train2l", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./log2l", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
 tf.app.flags.DEFINE_string("save_para_path", "", "path of the trained model, default latest in train_dir")
 
-tf.app.flags.DEFINE_boolean("use_lstm", True, "use_lstm")
+tf.app.flags.DEFINE_boolean("use_lstm", False, "use_lstm")
 tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
-tf.app.flags.DEFINE_boolean("bi_encode", True, "bidirectional encoder")
+tf.app.flags.DEFINE_boolean("bi_encode", False, "bidirectional encoder")
 
 tf.app.flags.DEFINE_integer("batch_size", 128, "batch_size")
 tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
 tf.app.flags.DEFINE_integer("num_units", 512, "num_units")
-tf.app.flags.DEFINE_integer("num_layers", 4, "num_layers")
+tf.app.flags.DEFINE_integer("num_layers", 2, "num_layers")
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
 tf.app.flags.DEFINE_integer("max_decode_len", 128, "max_decode_len")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
@@ -249,12 +249,15 @@ class data_process(object):
                     'input/response_string:0': batch['response'],
                     'input/response_len:0': batch['response_len']
                 }
-                res = sess.run(['decode_1/inference:0', 'decode_2/beam_out:0'], input_feed)
+                res = sess.run(['decode_1/inference:0', 'decode_2/beam_out:0', 'decode_1/alignment:0'], input_feed)
                 inference = cut_eos(' '.join(res[0][0]))
                 beam_out = [cut_eos(' '.join(res[1][0, :, i])) for i in range(FLAGS.beam_width)]
                 print 'inference > ' + inference
                 for i in range(FLAGS.beam_width):
                     print 'beam > ' + beam_out[i]
+                alignment = res[2]
+
+                print alignment
 
 
 def main(unused_argv):
@@ -340,6 +343,7 @@ def main(unused_argv):
                 model_path = tf.train.latest_checkpoint(FLAGS.train_dir)
             else:
                 model_path = FLAGS.save_para_path
+            print model_path
             saver = tf.train.import_meta_graph(model_path + '.meta')
             saver.restore(sess, model_path)
             dp.infer(sess)

@@ -190,7 +190,8 @@ class seq2seq(object):
             self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id, tf.int64), name='train_out')
 
         with tf.variable_scope("decode", reuse=True):
-            dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state)
+            dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state,
+                                                            alignment=True)
 
             start_tokens = tf.tile(tf.constant([GO_ID], dtype=tf.int32), [self.batch_size])
             end_token = EOS_ID
@@ -205,10 +206,13 @@ class seq2seq(object):
                 initial_state=init_state,
                 output_layer=self.output_layer
             )
-            infer_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
+            infer_output, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
                 decoder=infer_decoder,
                 maximum_iterations=self.max_decode_len,
             )
+
+            self.alignment = tf.identity(final_context_state.alignment_history.stack(),
+                                         name='alignment')
 
             self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64), name='inference')
 
@@ -256,7 +260,7 @@ class seq2seq(object):
                 [tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.GRUCell(self.num_units / 2), self.keep_prob) for _ in range(self.num_layers)])
         return cell_fw, cell_bw
 
-    def _build_decoder_cell(self, memory, memory_len, encode_state, beam_width=1):
+    def _build_decoder_cell(self, memory, memory_len, encode_state, beam_width=1, alignment=False):
         if self.use_lstm:
             cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.LSTMCell(self.num_units), self.keep_prob) for _ in range(self.num_layers)])
         else:
@@ -281,6 +285,7 @@ class seq2seq(object):
             cell=cell,
             attention_mechanism=attention_mechanism,
             attention_layer_size=self.num_units,
+            alignment_history=alignment,
         )
         return attn_cell, attn_cell.zero_state(self.batch_size * beam_width, tf.float32).clone(
             cell_state=encode_state)
