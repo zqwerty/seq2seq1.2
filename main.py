@@ -140,7 +140,7 @@ def main(unused_argv):
             saver.restore(sess, model_path)
             test_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_test) + '.post',
                                   os.path.join(FLAGS.data_dir, FLAGS.data_test) + '.response')
-            infer(sess, test_data, FLAGS.batch_size, os.path.join(FLAGS.data_dir, FLAGS.infer_out))
+            infer(sess, test_data, FLAGS.batch_size, os.path.join(FLAGS.log_dir, FLAGS.infer_out))
 
 
 if __name__ == '__main__':
