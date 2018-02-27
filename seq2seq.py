@@ -48,7 +48,8 @@ class seq2seq(object):
 
         with tf.variable_scope("input"):
             self.output_layer = Dense(self.vocab_size,
-                                      kernel_initializer=tf.truncated_normal_initializer(stddev=0.1))
+                                      # kernel_initializer=tf.truncated_normal_initializer(stddev=0.1),
+                                      use_bias=False)
         self._build_encoder()
         self._build_decoder()
         self.saver = tf.train.Saver(write_version=tf.train.SaverDef.V2,
@@ -164,7 +165,7 @@ class seq2seq(object):
             )
             train_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
                 decoder=train_decoder,
-                maximum_iterations=self.max_decode_len,
+                # maximum_iterations=self.max_decode_len,
             )
             logits = train_output.rnn_output
 
@@ -173,13 +174,14 @@ class seq2seq(object):
             crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=self.response, logits=logits)
             crossent = tf.reduce_sum(crossent * mask)
-            self.sen_loss = crossent / tf.to_float(self.batch_size)
+            # self.sen_loss = crossent / tf.to_float(self.batch_size)
 
             # ppl(loss avg) across each timestep, the same as :
-            # self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output,
-            #                                              self.response,
-            #                                              mask)
-            self.loss = crossent / tf.reduce_sum(mask)
+            self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output,
+                                                         self.response,
+                                                         mask)
+            # self.loss = crossent / tf.reduce_sum(mask)
+            self.sen_loss = self.loss
 
             # Calculate and clip gradients
             params = tf.trainable_variables()

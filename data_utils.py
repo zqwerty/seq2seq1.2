@@ -19,8 +19,8 @@ tf.app.flags.DEFINE_integer("test_size", 10000, "test_size")
 tf.app.flags.DEFINE_string("word_vector", "../vector.txt", "word vector")
 
 tf.app.flags.DEFINE_string("data_dir", "../weibo_pair", "data_dir")
-tf.app.flags.DEFINE_string("train_dir", "./train2l", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "./log2l", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "./traintest", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "./logtest", "log_dir")
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 tf.app.flags.DEFINE_string("infer_path", "", "path of the file to be infer")
@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_boolean("bi_encode", False, "bidirectional encoder")
 tf.app.flags.DEFINE_integer("batch_size", 128, "batch_size")
 tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
 tf.app.flags.DEFINE_integer("num_units", 512, "num_units")
-tf.app.flags.DEFINE_integer("num_layers", 2, "num_layers")
+tf.app.flags.DEFINE_integer("num_layers", 4, "num_layers")
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
 tf.app.flags.DEFINE_integer("max_decode_len", 128, "max_decode_len")
 tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
@@ -44,17 +44,17 @@ tf.app.flags.DEFINE_integer("max_iteration", 200000, "max_iteration")
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95, "learning rate")
 tf.app.flags.DEFINE_float("momentum", 0.9, "momentum")
-tf.app.flags.DEFINE_float("keep_prob", 0.8, "keep_prob")
+tf.app.flags.DEFINE_float("keep_prob", 1, "keep_prob")
 
 
 class data_process(object):
     def __init__(self,
                  tfFLAGS):
         self.data_dir = tfFLAGS.data_dir
-        self.train_from = os.path.join(self.data_dir, 'gen/train90w_from')
-        self.train_to = os.path.join(self.data_dir, 'gen/train90w_to')
-        self.valid_from = os.path.join(self.data_dir, 'gen/valid90w_from')
-        self.valid_to = os.path.join(self.data_dir, 'gen/valid90w_to')
+        self.train_from = os.path.join(self.data_dir, 'train2.weibo_pair.post')
+        self.train_to = os.path.join(self.data_dir, 'train2.weibo_pair.response')
+        self.valid_from = os.path.join(self.data_dir, 'valid.weibo_pair.post')
+        self.valid_to = os.path.join(self.data_dir, 'valid.weibo_pair.response')
         self.test_from = os.path.join(self.data_dir, 'gen/test90w_from')
         self.test_to = os.path.join(self.data_dir, 'gen/test90w_to')
         if not tfFLAGS.split:
