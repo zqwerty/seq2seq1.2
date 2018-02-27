@@ -19,8 +19,8 @@ tf.app.flags.DEFINE_string("infer_out", "infer_out.txt", "infer out")
 
 tf.app.flags.DEFINE_string("word_vector", "/home/data/zhuqi/vector.txt", "word vector")
 
-tf.app.flags.DEFINE_string("train_dir", "/home/data/zhuqi/model_log/seq2seq1.2/train/train", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "/home/data/zhuqi/model_log/seq2seq1.2/log/log", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "/home/data/zhuqi/model_log/seq2seq1.2/train/train173", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "/home/data/zhuqi/model_log/seq2seq1.2/log/log173", "log_dir")
 tf.app.flags.DEFINE_string("save_para_path", "", "path of the trained model, default latest in train_dir")
 
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
@@ -29,6 +29,7 @@ tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
 tf.app.flags.DEFINE_boolean("use_lstm", False, "lstm/GRU")
 tf.app.flags.DEFINE_boolean("bi_encode", False, "bidirectional encoder")
+tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
 
 tf.app.flags.DEFINE_integer("batch_size", 128, "batch_size")
 tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
@@ -117,7 +118,7 @@ def main(unused_argv):
                     for batch in eval_batches(valid_data,FLAGS.batch_size):
                         [loss] = model.step(sess, batch, is_train=False)
                         valid_loss += loss
-                    valid_loss /= FLAGS.valid_size // FLAGS.batch_size
+                    valid_loss /= len(valid_data) // FLAGS.batch_size
 
                     loss, ppl = sess.run([loss_summary_op, ppl_summary_op],
                                          feed_dict={loss_placeholder: valid_loss})
