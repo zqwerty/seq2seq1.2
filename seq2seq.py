@@ -2,17 +2,7 @@ import tensorflow as tf
 from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.python.layers.core import Dense
 from tensorflow.python.framework import constant_op
-
-_PAD = b"PAD"
-_GO = b"GO"
-_EOS = b"EOS"
-_UNK = b"UNK"
-_START_VOCAB = [_PAD, _EOS, _GO, _UNK]
-
-PAD_ID = 0
-EOS_ID = 1
-GO_ID = 2
-UNK_ID = 3
+from utils import UNK_ID, _UNK, GO_ID, EOS_ID
 
 
 class seq2seq(object):
@@ -42,16 +32,23 @@ class seq2seq(object):
             elif tfFLAGS.opt == 'Momentum':
                 self.opt = tf.train.MomentumOptimizer(learning_rate=tfFLAGS.learning_rate, momentum=tfFLAGS.momentum)
             else:
-                self.opt = tf.train.AdamOptimizer()
+                self.opt = tf.train.AdamOptimizer(learning_rate=tfFLAGS.learning_rate)
 
         self._make_input(embed)
 
         with tf.variable_scope("input"):
             self.output_layer = Dense(self.vocab_size,
-                                      # kernel_initializer=tf.truncated_normal_initializer(stddev=0.1),
+                                      kernel_initializer=tf.truncated_normal_initializer(stddev=0.1),
                                       use_bias=False)
         self._build_encoder()
         self._build_decoder()
+
+        # Calculate and clip gradients
+        params = tf.trainable_variables()
+        gradients = tf.gradients(self.sen_loss, params)
+        clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+        self.train_op = self.opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+
         self.saver = tf.train.Saver(write_version=tf.train.SaverDef.V2,
                                     max_to_keep=1, pad_step_number=True, keep_checkpoint_every_n_hours=1.0)
         for var in tf.trainable_variables():
@@ -151,7 +148,8 @@ class seq2seq(object):
 
     def _build_decoder(self):
         with tf.variable_scope("decode", initializer=tf.orthogonal_initializer()):
-            dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state)
+            dec_cell, init_state = self._build_decoder_cell(self.enc_outputs, self.post_len, self.enc_state,
+                                                            alignment=True)
 
             train_helper = tf.contrib.seq2seq.TrainingHelper(
                 inputs=self.dec_inp,
@@ -163,7 +161,7 @@ class seq2seq(object):
                 initial_state=init_state,
                 output_layer=self.output_layer
             )
-            train_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
+            train_output, train_final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
                 decoder=train_decoder,
                 # maximum_iterations=self.max_decode_len,
             )
@@ -174,20 +172,18 @@ class seq2seq(object):
             crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=self.response, logits=logits)
             crossent = tf.reduce_sum(crossent * mask)
-            # self.sen_loss = crossent / tf.to_float(self.batch_size)
+            # loss for gradient
+            self.sen_loss = crossent / tf.to_float(self.batch_size)
 
             # ppl(loss avg) across each timestep, the same as :
-            self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output,
-                                                         self.response,
-                                                         mask)
-            # self.loss = crossent / tf.reduce_sum(mask)
-            self.sen_loss = self.loss
+            # self.loss = tf.contrib.seq2seq.sequence_loss(train_output.rnn_output,
+            #                                              self.response,
+            #                                              mask)
+            # loss for ppl
+            self.ppl_loss = crossent / tf.reduce_sum(mask)
 
-            # Calculate and clip gradients
-            params = tf.trainable_variables()
-            gradients = tf.gradients(self.sen_loss, params)
-            clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
-            self.train_op = self.opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+            self.train_alignment = tf.identity(train_final_context_state.alignment_history.stack(),
+                                               name='train_alignment')
 
             self.train_out = self.index2symbol.lookup(tf.cast(train_output.sample_id, tf.int64), name='train_out')
 
@@ -208,13 +204,13 @@ class seq2seq(object):
                 initial_state=init_state,
                 output_layer=self.output_layer
             )
-            infer_output, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
+            infer_output, infer_final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
                 decoder=infer_decoder,
                 maximum_iterations=self.max_decode_len,
             )
 
-            self.alignment = tf.identity(final_context_state.alignment_history.stack(),
-                                         name='alignment')
+            self.infer_alignment = tf.identity(infer_final_context_state.alignment_history.stack(),
+                                               name='infer_alignment')
 
             self.inference = self.index2symbol.lookup(tf.cast(infer_output.sample_id, tf.int64), name='inference')
 
@@ -279,7 +275,6 @@ class seq2seq(object):
                 num_units=self.num_units,
                 memory=memory,
                 memory_sequence_length=memory_len,
-                scale=True
             )
         else:
             return cell, encode_state
@@ -309,20 +304,10 @@ class seq2seq(object):
         }
         if is_train:
             output_feed = [self.train_op,
-                           self.loss,
-                           # self.post_string,
-                           # self.response_string,
-                           # self.train_out,
-                           # self.inference,
-                           # self.beam_out,
+                           self.ppl_loss,
                            ]
             input_feed[self.keep_prob] = self.train_keep_prob
         else:
-            output_feed = [self.loss,
-                           # self.post_string,
-                           # self.response_string,
-                           # self.train_out,
-                           # self.inference,
-                           # self.beam_out,
+            output_feed = [self.ppl_loss,
                            ]
         return sess.run(output_feed, input_feed)
