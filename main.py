@@ -11,35 +11,35 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_string("data_dir", "/home/data/zhuqi/weibo_pair/", "data_dir")
-tf.app.flags.DEFINE_string("data_train", "train2.weibo_pair", "train data")
-tf.app.flags.DEFINE_string("data_valid", "valid.weibo_pair", "valid data")
-tf.app.flags.DEFINE_string("data_test", "test.weibo_pair", "test data")
+tf.app.flags.DEFINE_string("data_dir", "/home/data/zhuqi/nmt_data/", "data_dir")
+tf.app.flags.DEFINE_string("data_train", "train", "train data")
+tf.app.flags.DEFINE_string("data_valid", "tst2012", "valid data")
+tf.app.flags.DEFINE_string("data_test", "tst2013", "test data")
 tf.app.flags.DEFINE_string("infer_out", "infer_out.txt", "infer out")
 
-tf.app.flags.DEFINE_string("word_vector", "/home/data/zhuqi/vector.txt", "word vector")
+tf.app.flags.DEFINE_string("word_vector", "../home/data/zhuqi/vector.txt", "word vector")
 
-tf.app.flags.DEFINE_string("train_dir", "/home/data/zhuqi/model_log/seq2seq1.2/train/train173", "train_dir")
-tf.app.flags.DEFINE_string("log_dir", "/home/data/zhuqi/model_log/seq2seq1.2/log/log173", "log_dir")
+tf.app.flags.DEFINE_string("train_dir", "/home/data/zhuqi/model_log/seq2seq1.2/train/try5", "train_dir")
+tf.app.flags.DEFINE_string("log_dir", "/home/data/zhuqi/model_log/seq2seq1.2/log/try5", "log_dir")
 tf.app.flags.DEFINE_string("save_para_path", "", "path of the trained model, default latest in train_dir")
 
 tf.app.flags.DEFINE_string("attn_mode", "Luong", "attn_mode")
 tf.app.flags.DEFINE_string("opt", "SGD", "optimizer")
 
 tf.app.flags.DEFINE_boolean("is_train", True, "is_train")
-tf.app.flags.DEFINE_boolean("use_lstm", False, "lstm/GRU")
-tf.app.flags.DEFINE_boolean("bi_encode", False, "bidirectional encoder")
-tf.app.flags.DEFINE_boolean("share_emb", True, "share_emb")
+tf.app.flags.DEFINE_boolean("use_lstm", True, "lstm/GRU")
+tf.app.flags.DEFINE_boolean("bi_encode", True, "bidirectional encoder")
+tf.app.flags.DEFINE_boolean("share_emb", False, "share_emb")
 
 tf.app.flags.DEFINE_integer("batch_size", 128, "batch_size")
-tf.app.flags.DEFINE_integer("embed_size", 100, "embed_size")
-tf.app.flags.DEFINE_integer("num_units", 512, "num_units")
-tf.app.flags.DEFINE_integer("num_layers", 2, "num_layers")
+tf.app.flags.DEFINE_integer("embed_size", 512, "embed_size")
+tf.app.flags.DEFINE_integer("num_units", 1024, "num_units")
+tf.app.flags.DEFINE_integer("num_layers", 1, "num_layers")
 
 tf.app.flags.DEFINE_integer("beam_width", 5, "beam_width")
-tf.app.flags.DEFINE_integer("max_decode_len", 128, "max_decode_len")
-tf.app.flags.DEFINE_integer("vocab_size", 40000, "vocab_size")
-tf.app.flags.DEFINE_integer("save_every_n_iteration", 1000, "save_every_n_iteration")
+tf.app.flags.DEFINE_integer("max_decode_len", 50, "max_decode_len")
+tf.app.flags.DEFINE_integer("vocab_size", 17191, "vocab_size")
+tf.app.flags.DEFINE_integer("save_every_n_iteration", 100, "save_every_n_iteration")
 tf.app.flags.DEFINE_integer("max_step", 300000, "max_step")
 
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "learning rate")
@@ -55,10 +55,13 @@ def main(unused_argv):
     config.gpu_options.allow_growth = True
     with tf.Session(config=config) as sess:
         if FLAGS.is_train:
-            train_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_train) + '.post',
-                                   os.path.join(FLAGS.data_dir, FLAGS.data_train) + '.response')
-            valid_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_valid) + '.post',
-                                   os.path.join(FLAGS.data_dir, FLAGS.data_valid) + '.response')
+            train_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_train) + '.vi',
+                                   os.path.join(FLAGS.data_dir, FLAGS.data_train) + '.en', minl=0, maxl=50)
+            valid_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_valid) + '.vi',
+                                   os.path.join(FLAGS.data_dir, FLAGS.data_valid) + '.en', minl=0, maxl=1000)
+
+            print "train size: %d" % len(train_data)
+            print "valid size: %d" % len(valid_data)
 
             if tf.train.get_checkpoint_state(FLAGS.train_dir):
                 print("Reading model parameters from %s" % FLAGS.train_dir)
@@ -138,8 +141,8 @@ def main(unused_argv):
             print model_path
             saver = tf.train.import_meta_graph(model_path + '.meta')
             saver.restore(sess, model_path)
-            test_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_test) + '.post',
-                                  os.path.join(FLAGS.data_dir, FLAGS.data_test) + '.response')
+            test_data = load_data(os.path.join(FLAGS.data_dir, FLAGS.data_test) + '.vi',
+                                  os.path.join(FLAGS.data_dir, FLAGS.data_test) + '.en', minl=0, maxl=1000)
             infer(sess, test_data, FLAGS.batch_size, os.path.join(FLAGS.log_dir, FLAGS.infer_out))
 
 

@@ -16,14 +16,15 @@ GO_ID = 2
 UNK_ID = 3
 
 
-def load_data(post_f, resp_f):
+def load_data(post_f, resp_f, minl=0, maxl=50):
     f1 = open(post_f)
     f2 = open(resp_f)
     post = [line.strip().split() for line in f1.readlines()]
     response = [line.strip().split() for line in f2.readlines()]
     data = []
     for p, r in zip(post, response):
-        data.append({'post': p, 'response': r})
+        if maxl > len(p) > minl and maxl > len(r) > minl:
+            data.append({'post': p, 'response': r})
     f1.close()
     f2.close()
     return data
